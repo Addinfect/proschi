@@ -47,7 +47,7 @@ the panel offers **Keep in cloud**. If cloud sync is off, it offers
 
 ## 2. Save a version
 
-Open **Diagrams → Versions…**. Type a tag, add a note if you like, and press
+Open **File → Versions…**. Type a tag, add a note if you like, and press
 **Save version**.
 
 ![The Versions panel for orders.proschi: a tag field with 2026-11-01.2, a note field and a Save version button, then three saved versions, 2026-11-01 marked latest, 2026-10-01 and 2026-09-14, each with its note and buttons to view, compare, copy and delete](images/screens/versions-panel.png "Three saved versions of the orders design, newest first.")

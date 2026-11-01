@@ -47,8 +47,10 @@ usecase "Place order" {
 
 - **In the web editor**, among the diagrams saved in your browser, by file
   name. An opened `.proschi` file keeps its name, and a new diagram takes
-  one from its title (Shop Infra becomes `shop-infra.proschi`). Rename it
-  with the pencil in the *Diagrams* menu.
+  one from its title (Shop Infra becomes `shop-infra.proschi`). A folder is
+  part of the name (`payments/api.proschi`). Rename or move a file in the
+  list of diagrams beside the code: double-click its name, or use its
+  **⋯** menu.
 - **Everywhere else** (the command line and the editor and Claude Code
   plugins), on disk inside the [project root](#the-project-root), preferring
   unsaved editor text. Remote files come from the

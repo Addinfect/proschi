@@ -152,7 +152,7 @@ system orders "Order Processing" @Orders {
   team saved. It never reads the unsaved draft.
 - `orders` is the diagram's file name in your account, without spaces.
 
-The **Copy reference** button in **Diagrams → Versions…** copies the
+The **Copy reference** button in **File → Versions…** copies the
 reference, or a whole `system` block. The editor fetches the version from
 your own account only, and a share link carries it, so viewers need no
 account. The command line pins it in `proschi.lock`: see

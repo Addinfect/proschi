@@ -138,7 +138,7 @@ export const fetchFromAccount: FetchVersion = async (name, tag) => {
   if (response.status === 404) {
     throw new Error(
       tag === 'latest'
-        ? `${spec}: your account has no diagram named ${name} with a saved version. Save one under Diagrams → Versions.`
+        ? `${spec}: your account has no diagram named ${name} with a saved version. Save one under File → Versions.`
         : `${spec}: your account has no diagram named ${name} with a version '${tag}'.`,
     );
   }

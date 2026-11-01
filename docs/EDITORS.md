@@ -234,7 +234,7 @@ proschi fmt --check docs/    # write nothing; list the files that need it, exit 
 
 | Where | Format with |
 |---|---|
-| Web editor | **Diagrams → Format code**, or Shift+Alt+F |
+| Web editor | **File → Format code**, or Shift+Alt+F |
 | VS Code | **Format Document** (Shift+Alt+F) |
 | JetBrains | **Reformat Code** |
 | Neovim | `vim.lsp.buf.format()` |
@@ -335,7 +335,7 @@ Signed in, you can [sync `cloud:` imports](IMPORTS.md#cloud-sources) and
 ## Converting Mermaid and OpenAPI
 
 A Mermaid diagram or an OpenAPI spec can become a Proschi document, as a
-starting point to edit. In the web editor, use **Diagrams → Import Mermaid
+starting point to edit. In the web editor, use **File → Import Mermaid
 or OpenAPI…**. On the command line:
 
 ```sh
