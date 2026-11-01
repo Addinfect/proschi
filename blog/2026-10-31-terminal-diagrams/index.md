@@ -11,7 +11,7 @@ Proschi 0.12.0 draws diagrams inside Claude Code. When Claude answers with a
 Proschi block, writes a `.proschi` file, or you run `/proschi view`, you get
 the laid-out diagram in the terminal, not a wall of source.
 
-![A Proschi diagram drawn in the terminal: Shopper calls Shop API over HTTPS, which calls Cart cache and Orders DB. Shop API shows two stacked replicas and each card shows its load.](2026-10-31-terminal-diagrams.svg)
+![A Proschi diagram drawn in the terminal: Shopper calls Shop API over HTTPS, which calls Cart cache and Orders DB. Shop API shows two stacked replicas and each card shows its load.](terminal.svg)
 
 ## What shipped
 
@@ -43,7 +43,7 @@ the keyboard:
 | `d` | Back to the diagram |
 | `Esc` | Close the pane |
 
-The full list is in [Diagrams in the terminal](../docs/AGENT-SKILLS.md#diagrams-in-the-terminal).
+The full list is in [Diagrams in the terminal](../../docs/AGENT-SKILLS.md#diagrams-in-the-terminal).
 The change is [pull request #164](https://github.com/gvart/proschi/pull/164).
 
 ## What problem it solves
@@ -124,7 +124,7 @@ conversation with it: sketching a new service, explaining an existing one,
 or checking a change to a `.proschi` file in your repository.
 
 If you don't use Claude Code, nothing changes for you. The editor, the
-[VS Code extension](../docs/EDITORS.md) and the `proschi` CLI work as before.
+[VS Code extension](../../docs/EDITORS.md) and the `proschi` CLI work as before.
 
 Some limits to know. It draws in a terminal only; anywhere else a reply shows
 the block's source. Diagrams are fitted to the terminal's width (40 to 512

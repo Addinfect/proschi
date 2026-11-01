@@ -13,7 +13,7 @@ marked on the canvas and the simulation numbers side by side. Other
 diagrams can use a version through a `cloud:` reference, so an org diagram
 can show each team's design as that team saved it.
 
-![The compare view: on the left, the simulation of 2026-09-14 next to 2026-11-01 (traffic 2k to 3k rps, worst p99 59.9 ms to 38.2 ms, cost $600 to $1,250 a month) and the list of changes; on the right, the diagram with Order cache marked NEW and Orders API and Orders DB marked CHANGED.](2026-11-01-versions-and-cloud-references.png)
+![The compare view: on the left, the simulation of 2026-09-14 next to 2026-11-01 (traffic 2k to 3k rps, worst p99 59.9 ms to 38.2 ms, cost $600 to $1,250 a month) and the list of changes; on the right, the diagram with Order cache marked NEW and Orders API and Orders DB marked CHANGED.](compare.png)
 
 ## What shipped
 
@@ -51,7 +51,7 @@ present a new design, open the compare view with the old version as the
 base. The reviewer sees the new cache on the canvas, and that worst p99 went
 from 59.9 ms to 38.2 ms while the cost went from $600 to $1,250 a month.
 
-The second problem is the org diagram. [Team systems](2026-11-01-team-systems.md)
+The second problem is the org diagram. [Team systems](../2026-11-01-team-systems/index.md)
 draw each team as a box, built from that team's design file. That file had
 to sit in your project or in a git repository. Now a team's design can come
 straight from your account, pinned to the version the team saved:
@@ -114,8 +114,8 @@ requirements {
 }
 ```
 
-The full guide is [Save and compare diagram versions](../docs/VERSIONS.md),
-and the reference rules are in [Cloud sources](../docs/IMPORTS.md#cloud-sources).
+The full guide is [Save and compare diagram versions](../../docs/VERSIONS.md),
+and the reference rules are in [Cloud sources](../../docs/IMPORTS.md#cloud-sources).
 
 ## Who it is for
 

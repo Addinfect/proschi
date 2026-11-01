@@ -72,7 +72,7 @@ const files = Object.entries(
 
 /** Every ```proschi fence of the docs and the blog. */
 const fences = Object.entries(
-  import.meta.glob(['../../../docs/*.md', '../../../blog/*.md'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>,
+  import.meta.glob(['../../../docs/*.md', '../../../blog/*/index.md'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>,
 ).flatMap(([path, md]) => [...md.matchAll(/^```proschi[^\n]*\n([\s\S]*?)^```/gm)].map((m, i): [string, string] => [`${path} fence ${i + 1}`, m[1]]));
 
 const corpus: [string, string][] = [

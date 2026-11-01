@@ -1,4 +1,6 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 // @ts-expect-error jsdom ships no types, and @types/jsdom is not worth a dependency for one parse.
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
@@ -65,26 +67,50 @@ describe('posts', () => {
   it('publishes a post\'s images next to its page', () => {
     const r = rendered.find((x) => x.images.length > 0)!
     expect(r.html).toMatch(new RegExp(`<img src="${r.images[0].name}" alt="[^"]+" loading="lazy" />`))
-    expect(() => renderPost(site, parsePost('2026-01-02-a.md', post(META, '![x](../docs/images/a.png)\n')), blogDir)).toThrow(/next to the post/)
-    expect(() => renderPost(site, parsePost('2026-01-02-a.md', post(META, '![x](missing.svg)\n')), blogDir)).toThrow(/does not exist/)
-    expect(() => renderPost(site, parsePost('2026-01-02-a.md', post(META, '![x](a.gif)\n')))).toThrow(/is not one of/)
+    expect(() => renderPost(site, parsePost('2026-01-02-a/index.md', post(META, '![x](../docs/images/a.png)\n')), blogDir)).toThrow(/next to the post/)
+    expect(() => renderPost(site, parsePost('2026-01-02-a/index.md', post(META, '![x](../2026-01-01-b/a.png)\n')), blogDir)).toThrow(/next to the post/)
+    expect(() => renderPost(site, parsePost('2026-01-02-a/index.md', post(META, '![x](missing.svg)\n')), blogDir)).toThrow(/does not exist/)
+    expect(() => renderPost(site, parsePost('2026-01-02-a/index.md', post(META, '![x](a.gif)\n')))).toThrow(/is not one of/)
+  })
+})
+
+describe('the blog folder', () => {
+  const blog = (files: Record<string, string>) => {
+    const dir = mkdtempSync(join(tmpdir(), 'blog-'))
+    for (const [path, text] of Object.entries(files)) {
+      mkdirSync(join(dir, path, '..'), { recursive: true })
+      writeFileSync(join(dir, path), text)
+    }
+    return dir
+  }
+
+  it('reads one folder per post, and skips the README', () => {
+    const dir = blog({ 'README.md': '# Blog\n', '2026-01-02-a/index.md': post(META), '2026-01-02-a/pic.svg': '<svg/>' })
+    expect(readPosts(dir).map((p) => [p.slug, p.file])).toEqual([['a', '2026-01-02-a/index.md']])
+  })
+
+  it('rejects a post or an image outside a folder, and a folder without index.md', () => {
+    expect(() => readPosts(blog({ '2026-01-02-a.md': post(META) }))).toThrow(/go in a folder/)
+    expect(() => readPosts(blog({ 'pic.svg': '<svg/>' }))).toThrow(/go in a folder/)
+    expect(() => readPosts(blog({ '2026-01-02-a/notes.md': post(META) }))).toThrow(/has no index.md/)
   })
 })
 
 describe('frontmatter', () => {
-  it('reads the fields and the slug from the file name', () => {
-    const p = parsePost('2026-01-02-hello-world.md', post(`${META}\nversion: 1.2.3`))
+  it('reads the fields and the slug from the folder name', () => {
+    const p = parsePost('2026-01-02-hello-world/index.md', post(`${META}\nversion: 1.2.3`))
     expect(p).toMatchObject({ slug: 'hello-world', title: 'T', date: '2026-01-02', version: '1.2.3', tags: ['x'] })
   })
 
   it.each([
-    ['a bad file name', 'hello.md', post(META)],
-    ['no frontmatter', '2026-01-02-a.md', '## What shipped\n'],
-    ['a date that is not the file name\'s', '2026-01-03-a.md', post(META)],
-    ['no tags', '2026-01-02-a.md', post(META.replace('tags: [x]', ''))],
-    ['a bad version', '2026-01-02-a.md', post(`${META}\nversion: next`)],
-    ['an unknown field', '2026-01-02-a.md', post(`${META}\nauthor: me`)],
-    ['an h1 in the body', '2026-01-02-a.md', post(META, '# Title\n')],
+    ['a bad folder name', 'hello/index.md', post(META)],
+    ['a post outside a folder', '2026-01-02-a.md', post(META)],
+    ['no frontmatter', '2026-01-02-a/index.md', '## What shipped\n'],
+    ['a date that is not the folder name\'s', '2026-01-03-a/index.md', post(META)],
+    ['no tags', '2026-01-02-a/index.md', post(META.replace('tags: [x]', ''))],
+    ['a bad version', '2026-01-02-a/index.md', post(`${META}\nversion: next`)],
+    ['an unknown field', '2026-01-02-a/index.md', post(`${META}\nauthor: me`)],
+    ['an h1 in the body', '2026-01-02-a/index.md', post(META, '# Title\n')],
   ])('rejects %s', (_, file, text) => {
     expect(() => parsePost(file, text)).toThrow()
   })
@@ -118,7 +144,7 @@ describe('pages', () => {
 })
 
 describe('rss.xml', () => {
-  const extra = parsePost('2026-01-02-a-b.md', post(META.replace('title: T', 'title: "Fish & <chips>"')))
+  const extra = parsePost('2026-01-02-a-b/index.md', post(META.replace('title: T', 'title: "Fish & <chips>"')))
   const xml = rssXml([...posts, extra])
   const doc = (new JSDOM(xml, { contentType: 'text/xml' }) as { window: Window }).window.document
 

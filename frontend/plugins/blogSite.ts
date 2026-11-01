@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { basename, extname, join, posix } from 'node:path'
 import { parse as parseYaml } from 'yaml'
 import type { Plugin, Rollup, ViteDevServer } from 'vite'
@@ -11,21 +11,21 @@ import { REPO, SITE_ORIGIN, escapeHtml, readSite, renderMarkdown, type SiteConfi
  * the docs' layout:
  *
  * - blog/: every post, newest first (frontend/blog/index.html);
- * - blog/<slug>/: one post, from blog/<yyyy-mm-dd>-<slug>.md, copied from the
+ * - blog/<slug>/: one post, from blog/<yyyy-mm-dd>-<slug>/index.md, copied from the
  *   template frontend/blog/_post/index.html, which is then dropped;
  * - blog/rss.xml: an RSS 2.0 feed of the posts.
  *
- * A post starts with YAML frontmatter: title, date (the file name's),
+ * A post starts with YAML frontmatter: title, date (the folder name's),
  * description, version (the release, optional), audience and tags. Its
  * images (`![alt](<file>.svg)`, svg, png, jpg or webp) sit next to it in
- * blog/ and are published next to its page. Posts are written with the
+ * its folder and are published next to its page. Posts are written with the
  * /blog-post skill (.claude/skills/blog-post/SKILL.md).
  */
 
 export const POST_TEMPLATE = 'blog/_post/index.html'
 const INDEX_PAGE = 'blog/index.html'
 const PLACEHOLDER = /<!--blog:(head|page)-->/g
-const FILE = /^(\d{4}-\d{2}-\d{2})-([a-z0-9]+(?:-[a-z0-9]+)*)\.md$/
+const FILE = /^(\d{4}-\d{2}-\d{2})-([a-z0-9]+(?:-[a-z0-9]+)*)\/index\.md$/
 const IMAGE_TYPES = new Set(['.svg', '.png', '.jpg', '.jpeg', '.webp'])
 
 export const BLOG_TITLE = 'Proschi blog'
@@ -36,7 +36,7 @@ export const feedUrl = () => `${SITE_ORIGIN}blog/rss.xml`
 
 export interface Post {
   slug: string
-  /** The file in blog/, e.g. 2026-10-31-terminal-diagrams.md. */
+  /** The file in blog/, e.g. 2026-10-31-terminal-diagrams/index.md. */
   file: string
   title: string
   /** yyyy-mm-dd. */
@@ -54,7 +54,7 @@ export interface RenderedPost {
   html: string
   toc: TocEntry[]
   examples: string[]
-  /** The images it shows: the file in blog/ and the name it is published under, next to the page. */
+  /** The images it shows: the file in the post's folder and the name it is published under, next to the page. */
   images: { from: string; name: string }[]
 }
 
@@ -63,14 +63,14 @@ const isString = (v: unknown): v is string => typeof v === 'string' && v.trim() 
 /** Reads one post's frontmatter and body, checking every field. */
 export function parsePost(file: string, text: string): Post {
   const name = FILE.exec(file)
-  if (!name) throw new Error(`blog/${file}: name it <yyyy-mm-dd>-<slug>.md, with a slug in lower case and dashes`)
+  if (!name) throw new Error(`blog/${file}: put a post in blog/<yyyy-mm-dd>-<slug>/index.md, with a slug in lower case and dashes`)
   const m = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(text.replace(/\r\n/g, '\n'))
   if (!m) throw new Error(`blog/${file}: starts with --- frontmatter ---`)
   const meta = (parseYaml(m[1]) ?? {}) as Record<string, unknown>
   const date = meta.date instanceof Date ? meta.date.toISOString().slice(0, 10) : meta.date
   const fail = (what: string) => new Error(`blog/${file}: ${what}`)
   for (const key of ['title', 'description', 'audience']) if (!isString(meta[key])) throw fail(`needs a ${key}`)
-  if (date !== name[1]) throw fail(`the date (${String(date)}) is not the file name's (${name[1]})`)
+  if (date !== name[1]) throw fail(`the date (${String(date)}) is not the folder name's (${name[1]})`)
   if (meta.version !== undefined && !/^\d+\.\d+\.\d+$/.test(String(meta.version))) throw fail(`version ${String(meta.version)} is not x.y.z`)
   if (!Array.isArray(meta.tags) || meta.tags.length === 0 || !meta.tags.every(isString)) throw fail('needs tags, a list of words')
   const known = new Set(['title', 'date', 'description', 'version', 'audience', 'tags'])
@@ -90,12 +90,17 @@ export function parsePost(file: string, text: string): Post {
   }
 }
 
-/** Every post in `blogDir`, newest first. */
+/** Every post in `blogDir`, newest first: one folder per post, with its index.md and its images. */
 export function readPosts(blogDir: string): Post[] {
   if (!existsSync(blogDir)) return []
   const posts = readdirSync(blogDir)
-    .filter((f) => f.endsWith('.md') && f !== 'README.md')
-    .map((f) => parsePost(f, readFileSync(join(blogDir, f), 'utf8')))
+    .filter((f) => f !== 'README.md' && !f.startsWith('.'))
+    .map((f) => {
+      if (!statSync(join(blogDir, f)).isDirectory()) throw new Error(`blog/${f}: a post and its images go in a folder, blog/<yyyy-mm-dd>-<slug>/`)
+      const file = `${f}/index.md`
+      if (!existsSync(join(blogDir, file))) throw new Error(`blog/${f}: has no index.md`)
+      return parsePost(file, readFileSync(join(blogDir, file), 'utf8'))
+    })
   const slugs = new Set<string>()
   for (const p of posts) {
     if (slugs.has(p.slug) || p.slug === 'rss') throw new Error(`blog/${p.file}: the slug "${p.slug}" is taken`)
@@ -104,17 +109,18 @@ export function readPosts(blogDir: string): Post[] {
   return posts.sort((a, b) => b.date.localeCompare(a.date) || (b.version ?? '').localeCompare(a.version ?? '', 'en', { numeric: true }) || a.slug.localeCompare(b.slug))
 }
 
-/** Renders a post's Markdown; its images must sit in blog/ (`blogDir`). */
+/** Renders a post's Markdown; its images must sit in the post's folder in `blogDir`. */
 export function renderPost(site: SiteConfig, post: Post, blogDir?: string): RenderedPost {
   const images: RenderedPost['images'] = []
   const sourcePath = `blog/${post.file}`
   const image = (src: string): string => {
-    const repoPath = posix.normalize(posix.join('blog', src))
+    const folder = posix.dirname(post.file)
+    const repoPath = posix.normalize(posix.join('blog', folder, src))
     const name = basename(repoPath)
     const fail = (what: string) => new Error(`${sourcePath}: image ${src} ${what}`)
-    if (/^[a-z]+:/i.test(src) || repoPath !== `blog/${name}`) throw fail('must be a file next to the post, in blog/')
+    if (/^[a-z]+:/i.test(src) || repoPath !== `blog/${folder}/${name}`) throw fail(`must be a file next to the post, in blog/${folder}/`)
     if (!IMAGE_TYPES.has(extname(name).toLowerCase())) throw fail(`is not one of ${[...IMAGE_TYPES].join(', ')}`)
-    const from = blogDir ? join(blogDir, name) : name
+    const from = blogDir ? join(blogDir, folder, name) : name
     if (blogDir && !existsSync(from)) throw fail('does not exist')
     if (!images.some((i) => i.name === name)) images.push({ from, name })
     return name

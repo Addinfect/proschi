@@ -5,8 +5,9 @@ description: Write the release post for proschi.app/blog from the release-please
 
 # /blog-post: write a release post
 
-The blog lives at <https://proschi.app/blog/>. Posts are Markdown files in
-`blog/` at the repository root, built by `frontend/plugins/blogSite.ts` into
+The blog lives at <https://proschi.app/blog/>. Each post is a folder in
+`blog/` at the repository root (`blog/<yyyy-mm-dd>-<slug>/index.md`, with
+its images next to it), built by `frontend/plugins/blogSite.ts` into
 `/blog/<slug>/`, the index `/blog/` and the feed `/blog/rss.xml`. Run this
 before merging release-please's release PR, and commit the post into that PR.
 
@@ -19,7 +20,7 @@ and commit locally once the user says the post is good.
    (release-please's open release PR). Its body is the new `CHANGELOG.md`
    section. If there is no open release PR, use the newest section of
    `CHANGELOG.md` and ask the user which release to write about.
-2. The last post: the newest `blog/*.md` by date. Its `version` is where
+2. The last post: the newest `blog/*/index.md` by date. Its `version` is where
    this post starts.
 3. The merged PRs since then: every `#123` in the release notes, or
    `git log --oneline <last tag>..HEAD` (tags are `tooling-v<version>`).
@@ -33,13 +34,14 @@ leave it out. Never invent numbers, quotes, users or benchmarks.
 
 ## 2. Write the post
 
-Create `blog/<yyyy-mm-dd>-<slug>.md`, where the date is today and the slug
-says what shipped in two to five words (`terminal-diagrams`). Frontmatter:
+Create the folder `blog/<yyyy-mm-dd>-<slug>/` with the post in `index.md`,
+where the date is today and the slug says what shipped in two to five
+words (`terminal-diagrams`). Frontmatter:
 
 ```yaml
 ---
 title: Proschi diagrams in the Claude Code terminal   # what shipped, in plain words, no colon puns
-date: 2026-10-31                                      # the file name's date
+date: 2026-10-31                                      # the folder name's date
 description: One or two sentences for the index, the feed and search results.
 version: 0.12.0                                       # the release; leave out for a post that is not a release
 audience: Who should read it, in one sentence.
@@ -68,9 +70,9 @@ End after "Who it is for". No closing summary, no "Conclusion".
 
 - A ```proschi fence is a live diagram. Use ```proschi fragment for a
   partial document that is only highlighted.
-- Images sit next to the post in `blog/`, named after it
-  (`blog/2026-10-31-terminal-diagrams.svg`), and are linked by file name:
-  `![What the reader sees](2026-10-31-terminal-diagrams.svg)`. SVG, PNG,
+- Images sit next to the post in its folder, with short names that say
+  what they show (`blog/2026-10-31-terminal-diagrams/terminal.svg`), and are
+  linked by file name: `![What the reader sees](terminal.svg)`. SVG, PNG,
   JPG or WebP. They are published next to the post's page. Write real alt
   text: what the picture shows.
 - An SVG must be static: no `<script>`, no external fonts, images or links
@@ -80,7 +82,7 @@ End after "Who it is for". No closing summary, no "Conclusion".
 
 ### Links
 
-Link to the docs by their Markdown files (`../docs/AGENT-SKILLS.md#diagrams-in-the-terminal`)
+Link to the docs by their Markdown files (`../../docs/AGENT-SKILLS.md#diagrams-in-the-terminal`)
 or by `https://proschi.app/...`: both become links within the site. Link
 PRs as `https://github.com/gvart/proschi/pull/<n>`.
 

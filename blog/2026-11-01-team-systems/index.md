@@ -13,7 +13,7 @@ team's own `.proschi` design. When your traffic is more than a team can take,
 the simulation names the team and its node that gives out, so you can talk to
 the owning team before you scale your part.
 
-![An org diagram for a drone startup rendered by proschi render at 5.2k rps: Customer, then Frontend (ok, 5.2k of 18k rps headroom), then Order Processing (saturated, 5.2k sent against 4.7k headroom), then Warehouse and Feed, both marked hot.](2026-11-01-team-systems.svg)
+![An org diagram for a drone startup rendered by proschi render at 5.2k rps: Customer, then Frontend (ok, 5.2k of 18k rps headroom), then Order Processing (saturated, 5.2k sent against 4.7k headroom), then Warehouse and Feed, both marked hot.](org.svg)
 
 ## What shipped
 
@@ -66,7 +66,7 @@ at writes 5.5k rps of 5k rps, 110%.
 You know whom to ask (the Orders team), which node runs out (its database)
 and by how much, without opening their design. Expand the box to see it:
 
-![The same org diagram rendered with --expand orders: the Order Processing frame holds its gateway, api at 92%, db at 110% and saturated, svc1 and cache1.](2026-11-01-team-systems-expanded.svg)
+![The same org diagram rendered with --expand orders: the Order Processing frame holds its gateway, api at 92%, db at 110% and saturated, svc1 and cache1.](org-expanded.svg)
 
 Imports had a quieter problem: a relative path could reach any file on your
 disk. Now paths stay inside the project, and a file from another repository
@@ -166,8 +166,8 @@ traffic {
 
 To try linked team files in the browser, pick **Drone startup (team
 systems)** from the editor's examples. The full walkthrough is in
-[Org diagrams and team systems](../docs/SYSTEMS.md), and the rules for imports
-are in [Security model for imports](../docs/IMPORTS.md#security-model-for-imports).
+[Org diagrams and team systems](../../docs/SYSTEMS.md), and the rules for imports
+are in [Security model for imports](../../docs/IMPORTS.md#security-model-for-imports).
 
 ## Who it is for
 

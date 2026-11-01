@@ -13,7 +13,7 @@ of them with Ctrl+P (Cmd+P on a Mac). The header got shorter too: the
 editor's menus moved into one **File** menu, and the site's links left the
 editor.
 
-![The editor with the sidebar on the left: folders payments (Ledger, Payments API, Refunds) and platform (observability with Metrics pipeline, and API gateway), then Notes and Shop at the top level. Payments API is open in the code pane and drawn on the right. At the bottom of the sidebar: Saved in this browser only.](2026-11-01-editor-folders-and-sidebar.png)
+![The editor with the sidebar on the left: folders payments (Ledger, Payments API, Refunds) and platform (observability with Metrics pipeline, and API gateway), then Notes and Shop at the top level. Payments API is open in the code pane and drawn on the right. At the bottom of the sidebar: Saved in this browser only.](sidebar.png)
 
 ## What shipped
 
@@ -94,7 +94,7 @@ requirements {
 ```
 
 How the editor finds imported files, folders included, is in
-[Where imports are found](../docs/IMPORTS.md#where-imports-are-found).
+[Where imports are found](../../docs/IMPORTS.md#where-imports-are-found).
 
 ## Who it is for
 

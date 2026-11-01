@@ -1,7 +1,7 @@
 # Proschi writing style
 
 The one style guide for everything a reader of proschi.app sees: the docs
-(`docs/*.md`), the blog (`blog/*.md`) and the practice lessons. `/docs-writer`
+(`docs/*.md`), the blog (`blog/*/index.md`) and the practice lessons. `/docs-writer`
 and `/blog-post` both follow it. Change a rule here, never in a copy.
 
 ## Voice
