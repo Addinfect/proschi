@@ -16,7 +16,7 @@ function allowStatus(errors: string[], status: number) {
 }
 
 async function openVersions(page: Page) {
-  await page.getByRole('button', { name: 'Diagrams' }).click();
+  await page.getByRole('button', { name: 'File' }).click();
   await page.getByRole('menuitem', { name: 'Versions…' }).click();
   return page.getByRole('dialog', { name: 'Versions' });
 }
@@ -141,7 +141,7 @@ test('a cloud: reference draws the saved version in a system box, read-only, and
   await again.goto(url);
   await expect(again.locator('.react-flow__node-systemNode', { hasText: 'Order Processing' })).toBeVisible();
   // Once the sync settles, anything it would have saved is saved.
-  await again.getByRole('button', { name: 'Diagrams' }).click();
+  await again.getByRole('button', { name: 'File' }).click();
   await expect(again.getByTestId('cloud-status')).toContainText('Saved to your account');
   await again.keyboard.press('Escape');
   const stored = await again.evaluate(() => JSON.parse(localStorage.getItem('proschi.docs') ?? '{}') as { docs: { id: string; imports?: Record<string, string> }[] });

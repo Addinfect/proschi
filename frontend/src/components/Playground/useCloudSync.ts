@@ -197,7 +197,7 @@ export function useCloudSync(store: DocStore, onConflict: (titles: string[]) => 
   return { state, enabled, signIn, setEnabled, deleteCloudCopies, ask, held, answer, signOut, ...placement, moveToBrowser, keepInCloud, pushedVersion, pull };
 }
 
-/** The sync status in words, for the Diagrams menu. */
+/** The sync status in words, for the File menu and the diagrams sidebar. */
 export function cloudLabel(state: CloudState): string {
   switch (state.kind) {
     case 'unavailable':

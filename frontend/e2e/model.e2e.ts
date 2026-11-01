@@ -52,7 +52,8 @@ test.describe('simulation page', () => {
   test('"How is this calculated?" links from the editor and practice', async ({ page }) => {
     await page.goto('app/');
     await expect(codeEditor(page)).toBeVisible();
-    await page.getByRole('button', { name: 'Examples' }).click();
+    await page.getByRole('button', { name: 'File' }).click();
+    await page.getByRole('menuitem', { name: 'Examples…' }).click();
     await page.getByRole('dialog', { name: 'Examples' }).getByRole('button', { name: /URL shortener HLD/ }).click();
     const views = page.getByRole('tablist', { name: 'Diagram view' });
 

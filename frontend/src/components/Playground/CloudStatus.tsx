@@ -4,14 +4,14 @@ import { cloudLabel, type CloudState, type CloudSync } from './useCloudSync';
 
 const PROVIDER_LABEL = { github: 'GitHub', google: 'Google' } as const;
 
-/** The small cloud by the Diagrams menu's title: only when signed in with sync on. */
+/** The small cloud by the diagram's title in the header: only when signed in with sync on. */
 export function CloudIcon({ state }: { state: CloudState }) {
   if (state.kind === 'saved' || state.kind === 'saving') return <Cloud size={13} aria-hidden="true" className={state.kind === 'saving' ? 'text-muted animate-pulse' : 'text-muted'} />;
   if (state.kind === 'offline' || state.kind === 'error') return <CloudOff size={13} aria-hidden="true" className="text-muted" />;
   return null;
 }
 
-/** The bottom of the Diagrams menu: where the diagrams are saved, sign-in, and the cloud sync setting. */
+/** The bottom of the File menu: where the diagrams are saved, sign-in, and the cloud sync setting. */
 export default function CloudSection({ cloud, close }: { cloud: CloudSync; close: () => void }) {
   const { state } = cloud;
   const note = state.kind === 'saved' ? state.note : undefined;

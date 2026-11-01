@@ -88,7 +88,7 @@ async function openVersions(page: Page) {
   await page.goto('app/');
   await expect(codeEditor(page)).toBeVisible();
   await waitForCanvas(page);
-  await page.getByRole('button', { name: 'Diagrams' }).click();
+  await page.getByRole('button', { name: 'File' }).click();
   await page.getByRole('menuitem', { name: 'Versions…' }).click();
   const dialog = page.getByRole('dialog', { name: 'Versions' });
   await expect(dialog.getByRole('list', { name: 'Saved versions' }).getByRole('listitem')).toHaveCount(3);

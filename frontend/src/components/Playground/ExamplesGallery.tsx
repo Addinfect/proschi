@@ -124,7 +124,7 @@ export default function ExamplesGallery({ onPick, onClose }: ExamplesGalleryProp
         <div className="flex items-center justify-between gap-3 px-5 py-4 border-b-bw-2 border-ink">
           <div>
             <h2 className="font-display text-2xl font-extrabold tracking-[-0.02em] text-ink">Start from…</h2>
-            <p className="text-sm text-muted">Each one opens as a new diagram; your work stays in the diagrams menu.</p>
+            <p className="text-sm text-muted">Each one opens as a new diagram; your work stays in your list of diagrams.</p>
           </div>
           <button onClick={onClose} aria-label="Close" className="p-1.5 rounded-md text-muted hover:bg-ink/10">
             <X size={18} />

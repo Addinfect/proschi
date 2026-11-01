@@ -1,6 +1,6 @@
-import { BookOpenText, Compass, ExternalLink, FileCode, Gauge } from 'lucide-react';
+import { BookOpen, BookOpenText, Compass, ExternalLink, FileCode, Gauge } from 'lucide-react';
 import { MenuItem } from '../components/Playground/Menu';
-import { LANGUAGE_URL, MODEL_URL } from './links';
+import { DOCS_URL, LANGUAGE_URL, MODEL_URL } from './links';
 
 interface HelpMenuItemsProps {
   tourLabel: string;
@@ -28,6 +28,10 @@ export default function HelpMenuItems({ tourLabel, onTour, onCheatSheet }: HelpM
       <a role="menuitem" href={MODEL_URL} className={linkClass}>
         <Gauge size={14} />
         How the simulation works
+      </a>
+      <a role="menuitem" href={DOCS_URL} className={linkClass}>
+        <BookOpen size={14} />
+        All docs
       </a>
     </>
   );

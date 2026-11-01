@@ -10,7 +10,7 @@ async function openEditor(page: Page) {
 test.describe('import and the start gallery', () => {
   test('a Mermaid flowchart pasted in the Import dialog opens as a new diagram', async ({ page }) => {
     await openEditor(page);
-    await page.getByRole('button', { name: 'Diagrams' }).click();
+    await page.getByRole('button', { name: 'File' }).click();
     await page.getByRole('menuitem', { name: 'Import Mermaid or OpenAPI…' }).click();
     const dialog = page.getByRole('dialog', { name: 'Import' });
     await expect(dialog).toBeVisible();
@@ -36,7 +36,7 @@ test.describe('import and the start gallery', () => {
 
   test('an OpenAPI spec becomes a client, the API and a use case per operation', async ({ page }) => {
     await openEditor(page);
-    await page.getByRole('button', { name: 'Diagrams' }).click();
+    await page.getByRole('button', { name: 'File' }).click();
     await page.getByRole('menuitem', { name: 'Import Mermaid or OpenAPI…' }).click();
     const dialog = page.getByRole('dialog', { name: 'Import' });
     await dialog.getByRole('tab', { name: 'OpenAPI' }).click();
@@ -50,7 +50,8 @@ test.describe('import and the start gallery', () => {
   test('the gallery shows reference solutions of solved problems only, and filters by pattern', async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem('proschi.practice', JSON.stringify({ 'url-shortener': { status: 'solved' } })));
     await openEditor(page);
-    await page.getByRole('button', { name: 'Examples' }).click();
+    await page.getByRole('button', { name: 'File' }).click();
+    await page.getByRole('menuitem', { name: 'Examples…' }).click();
     const gallery = page.getByRole('dialog', { name: 'Examples' });
     await expect(gallery.getByRole('button', { name: 'Reference solution: URL Shortener' })).toBeVisible();
     // Unsolved problems are listed without their designs.

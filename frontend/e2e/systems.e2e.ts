@@ -158,7 +158,7 @@ test.describe('team systems in the editor', () => {
   });
 
   test('Format code keeps the references to entry points whole', async ({ page }) => {
-    await page.getByRole('button', { name: 'Diagrams' }).click();
+    await page.getByRole('button', { name: 'File' }).click();
     await page.getByRole('menuitem', { name: /Format code/ }).click();
     // The connections line up, so the document did change.
     await expect.poll(() => editorText(page)).toContain('\nshopper  -> frontend.web    : HTTPS\n');
@@ -258,7 +258,8 @@ test('a narrow team design with a long name keeps its frame controls inside the 
 test('the drone example opens its team files as diagrams, which Open edits', async ({ page }) => {
   await page.goto('app/');
   const openDrone = async () => {
-    await page.getByRole('button', { name: 'Examples' }).click();
+    await page.getByRole('button', { name: 'File' }).click();
+    await page.getByRole('menuitem', { name: 'Examples…' }).click();
     await page.getByRole('dialog', { name: 'Examples' }).getByRole('button', { name: 'Drone startup (team systems)' }).click();
     await expect(box(page, 'Order Processing')).toBeVisible();
   };

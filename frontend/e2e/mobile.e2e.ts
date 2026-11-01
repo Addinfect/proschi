@@ -279,8 +279,10 @@ for (const width of [320, 400, 470]) {
     test('fits on every kind of page', async ({ page }) => {
       for (const path of ['./', 'practice/', 'practice/#/review', 'practice/#/url-shortener', 'app/', 'docs/']) {
         await visit(page, path);
-        const burger = (await page.locator('.ps-header .ps-menu__button').boundingBox())!;
-        expect(burger.x + burger.width, `${path}: the menu button is off screen`).toBeLessThanOrEqual(width);
+        // The editor has no site links, so no menu button: its last control is the theme toggle.
+        const last = page.locator(path === 'app/' ? '.ps-header .ps-header__end > :last-child' : '.ps-header .ps-menu__button');
+        const box = (await last.boundingBox())!;
+        expect(box.x + box.width, `${path}: the header's last control is off screen`).toBeLessThanOrEqual(width);
       }
     });
   });

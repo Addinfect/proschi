@@ -180,8 +180,17 @@ export function addFile(state: DocumentState, source: string, fileName: string, 
 export function renameFile(state: DocumentState, id: string, fileName: string): DocumentState {
   const clean = fileName.trim().replace(/^\/+/, '');
   if (!clean) return state;
-  const name = clean.endsWith('.proschi') ? clean : `${clean}.proschi`;
+  const wanted = clean.endsWith('.proschi') ? clean : `${clean}.proschi`;
+  // Two diagrams never share a name: imports and the account find them by it.
+  const name = freeName(wanted, new Set(state.docs.filter((d) => d.id !== id).map(fileNameOf)));
   return { ...state, docs: state.docs.map((d) => (d.id === id ? { ...d, fileName: name } : d)) };
+}
+
+/** `name` if free, else `name-2.proschi`, `name-3.proschi`, … */
+export function freeName(name: string, taken: ReadonlySet<string>): string {
+  if (!taken.has(name)) return name;
+  const stem = name.replace(/\.proschi$/, '');
+  for (let n = 2; ; n++) if (!taken.has(`${stem}-${n}.proschi`)) return `${stem}-${n}.proschi`;
 }
 
 export function selectDoc(state: DocumentState, id: string): DocumentState {

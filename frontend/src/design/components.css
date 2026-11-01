@@ -858,3 +858,36 @@
     gap: 48px;
   }
 }
+
+/* ---------- scrollbars ---------- */
+
+/* Slim, rounded ink thumbs on a clear track, in both themes. Chrome and
+   Safari style them through the ::-webkit-scrollbar parts (setting
+   scrollbar-color there would switch those off); Firefox gets the standard
+   properties. */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: rgb(var(--c-ink) / 0.22);
+  background-clip: content-box;
+  border: 3px solid transparent;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(var(--c-ink) / 0.45);
+}
+::-webkit-scrollbar-thumb:active {
+  background-color: rgb(var(--c-ink) / 0.6);
+}
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--c-ink) / 0.3) transparent;
+  }
+}

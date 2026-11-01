@@ -19,6 +19,8 @@ export interface HeaderProps {
   children?: ReactNode;
   /** Controls before the theme toggle, like the account and help menus; on phones they make room (components.css). */
   actions?: ReactNode;
+  /** The site's links (and their menu on narrow screens); the editor leaves them out to keep its bar for its own controls. */
+  siteNav?: boolean;
   /** Static pages: an empty slot for the account control, which enhance.ts fills in from the session (account.ts). */
   accountSlot?: boolean;
 }
@@ -50,7 +52,7 @@ function NavLink({ link, base, current, className }: { link: SiteLink; base: str
  * build time (plugins/siteShell.ts), React pages mount it. Below 1040px (1200px
  * when compact) the links fold into a menu.
  */
-export default function Header({ base, current, compact = false, children, actions, accountSlot = false }: HeaderProps) {
+export default function Header({ base, current, compact = false, children, actions, siteNav = true, accountSlot = false }: HeaderProps) {
   const menuRef = useRef<HTMLDetailsElement>(null);
   useEffect(() => (menuRef.current ? bindMenu(menuRef.current) : undefined), []);
 
@@ -59,11 +61,13 @@ export default function Header({ base, current, compact = false, children, actio
       <div className="ps-header__inner">
         <Wordmark href={base} compact={compact} />
         {compact && children && <div className="ps-header__tools">{children}</div>}
-        <nav className="ps-nav" aria-label="Main">
-          {NAV.map((link) => (
-            <NavLink key={link.label} link={link} base={base} current={current} className="ps-nav__link" />
-          ))}
-        </nav>
+        {siteNav && (
+          <nav className="ps-nav" aria-label="Main">
+            {NAV.map((link) => (
+              <NavLink key={link.label} link={link} base={base} current={current} className="ps-nav__link" />
+            ))}
+          </nav>
+        )}
         <div className="ps-header__end">
           {actions}
           {accountSlot && <div data-account="" data-base={base} hidden />}
@@ -73,20 +77,22 @@ export default function Header({ base, current, compact = false, children, actio
               Open<span className="ps-hide-sm"> the</span> editor
             </Button>
           )}
-          <details ref={menuRef} className="ps-menu">
-            <summary className="ps-iconbtn ps-menu__button" aria-label="Menu">
-              <svg className="ps-icon ps-menu__burger" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 7h16" />
-                <path d="M4 12h16" />
-                <path d="M4 17h16" />
-              </svg>
-            </summary>
-            <nav className="ps-menu__panel" aria-label="Main">
-              {[...NAV, { ...EDITOR_LINK, label: 'Editor' }].map((link) => (
-                <NavLink key={link.label} link={link} base={base} current={current} className="ps-menu__link" />
-              ))}
-            </nav>
-          </details>
+          {siteNav && (
+            <details ref={menuRef} className="ps-menu">
+              <summary className="ps-iconbtn ps-menu__button" aria-label="Menu">
+                <svg className="ps-icon ps-menu__burger" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 7h16" />
+                  <path d="M4 12h16" />
+                  <path d="M4 17h16" />
+                </svg>
+              </summary>
+              <nav className="ps-menu__panel" aria-label="Main">
+                {[...NAV, { ...EDITOR_LINK, label: 'Editor' }].map((link) => (
+                  <NavLink key={link.label} link={link} base={base} current={current} className="ps-menu__link" />
+                ))}
+              </nav>
+            </details>
+          )}
         </div>
       </div>
     </header>

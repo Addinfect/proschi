@@ -240,7 +240,7 @@ test.describe('starter for a new diagram', () => {
   test('offers a template, examples and practice', async ({ page }) => {
     await page.goto('app/');
     await waitForCanvas(page, FIRST_RUN_NODES);
-    await page.getByRole('button', { name: 'Diagrams' }).click();
+    await page.getByRole('button', { name: 'File' }).click();
     await page.getByRole('menuitem', { name: 'New diagram' }).click();
     const starter = page.getByRole('region', { name: 'Start a diagram' });
     await expect(starter).toBeVisible();
@@ -256,14 +256,13 @@ test.describe('starter for a new diagram', () => {
   test('an example picked from an empty diagram replaces it', async ({ page }) => {
     await page.goto('app/');
     await waitForCanvas(page, FIRST_RUN_NODES);
-    await page.getByRole('button', { name: 'Diagrams' }).click();
+    await page.getByRole('button', { name: 'File' }).click();
     await page.getByRole('menuitem', { name: 'New diagram' }).click();
     await page.getByRole('region', { name: 'Start a diagram' }).getByRole('button', { name: /Start from an example/ }).click();
     await page.getByRole('dialog', { name: 'Examples' }).getByRole('button', { name: /Serverless/ }).click();
-    await page.getByRole('button', { name: 'Diagrams' }).click();
-    const menu = page.getByRole('menu');
-    await expect(menu.getByText('Untitled')).toHaveCount(0);
-    await expect(menu.getByText('Hello Proschi')).toBeVisible();
+    const files = page.getByRole('complementary', { name: 'Diagrams' });
+    await expect(files.getByText('Untitled')).toHaveCount(0);
+    await expect(files.getByText('Hello Proschi')).toBeVisible();
   });
 });
 

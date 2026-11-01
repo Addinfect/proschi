@@ -20,6 +20,8 @@ server. What they remember stays in your browser's storage on this device:
 | `proschi.docs` | Your diagrams in the editor: their text, file names and which one is open |
 | `proschi.docs.sync` | Cloud sync, signed in: which account it syncs with, whether you turned it off, per diagram the version your account has and a fingerprint of its content then (to tell what changed since), and which diagrams in this browser you have not (yet) agreed to add to the account |
 | `proschi.playground.source` | A diagram saved by an older version of the editor, read once to carry it over |
+| `proschi.playground.files` | Whether the editor's list of diagrams is shown or hidden |
+| `proschi.playground.collapsed` | The names of the folders you closed in the editor's list of diagrams |
 | `proschi.practice` | Practice progress: per problem, your latest design, how many times you ran the tests and whether you solved it |
 | `proschi.practice.runs` | Per problem: how many test runs, the runs it took to solve it, and the monthly cost of your cheapest solving design and of the reference solution, for the badges on a copy of the site without accounts |
 | `proschi.practice.last` | The last practice problem you opened, for "Continue" on the practice page |
@@ -165,7 +167,7 @@ above are about events, not about you).
   local date then. Runs
   played signed out stay in your browser and are sent when you sign in.
 - Your diagrams in the editor, while cloud sync is on (it is, once you
-  sign in, until you turn it off in the editor's Diagrams menu): each one's
+  sign in, until you turn it off in the editor's File menu): each one's
   file name, text and the imported files a share link brought, a version
   number and when it last changed. The diagrams already in your browser are
   uploaded when you first sign in. They are private: they never appear on a
@@ -173,10 +175,10 @@ above are about events, not about you).
   leaves a marker (its id, version and when) for 30 days, so your other
   devices delete their copy too; its text is removed at once. Your account
   keeps at most 5 diagrams on the free plan, 64 KiB each; the others stay in your browser only, marked "This browser only" in
-  the Diagrams menu, and are never lost. **Move to this browser only** in
-  that menu takes a diagram out of your account (and your other devices) to
-  free a slot. Turning sync off keeps the copies in your account until you
-  choose **Delete my cloud copies** in the same menu.
+  the editor's list of diagrams, and are never lost. **Move to this browser
+  only**, in a diagram's actions there, takes it out of your account (and
+  your other devices) to free a slot. Turning sync off keeps the copies in
+  your account until you choose **Delete my cloud copies** in the File menu.
 
   **Shared computers.** The browser remembers which account its diagrams
   were synced with. When a different account signs in, the diagrams synced
@@ -359,7 +361,7 @@ In Settings on the practice page (`#/me`, from the account menu):
   app) but never the token hashes; short links come with their diagrams and
   the address of each preview, and email reminders with their address and
   settings (the unsubscribe secret stays out).
-- **Delete my cloud copies**, in the editor's Diagrams menu once cloud sync
+- **Delete my cloud copies**, in the editor's File menu once cloud sync
   is off, removes every diagram from your account, their versions with
   them; those in your browser stay. A single version can be deleted on its
   own.

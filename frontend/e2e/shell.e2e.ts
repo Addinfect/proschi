@@ -8,12 +8,14 @@ const theme = (page: Page) => page.evaluate(() => document.documentElement.datas
 const toggle = (page: Page) => page.locator('.ps-header').getByRole('button', { name: /^Theme:/ });
 
 test.describe('shared header and footer', () => {
-  test('every page has the same header links, and the static pages and practice the same footer', async ({ page }) => {
+  test('every page but the editor has the same header links, and the static pages and practice the same footer', async ({ page }) => {
     const footers: string[][] = [];
     for (const path of PAGES) {
       await page.goto(path);
       const nav = page.getByRole('navigation', { name: 'Main' });
-      await expect(nav.getByRole('link')).toHaveText([/Docs/, 'Practice', 'Blog', /GitHub/]);
+      // The editor keeps its bar for its own controls: no site links (Docs is in its Help menu).
+      if (path === 'app/') await expect(nav).toHaveCount(0);
+      else await expect(nav.getByRole('link')).toHaveText([/Docs/, 'Practice', 'Blog', /GitHub/]);
       await expect(page.getByRole('link', { name: 'Proschi home' }).first()).toBeVisible();
       await expect(toggle(page)).toBeVisible();
       const footer = page.getByRole('contentinfo');

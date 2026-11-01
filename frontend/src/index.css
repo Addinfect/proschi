@@ -18,3 +18,16 @@
     font-size: 16px;
   }
 }
+
+/* The code pane stays dark in both themes, so its scrollbar thumb is light. */
+.proschi-editor ::-webkit-scrollbar-thumb {
+  background-color: rgb(255 255 255 / 0.18);
+}
+.proschi-editor ::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(255 255 255 / 0.35);
+}
+@supports not selector(::-webkit-scrollbar) {
+  .proschi-editor * {
+    scrollbar-color: rgb(255 255 255 / 0.25) transparent;
+  }
+}

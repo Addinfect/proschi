@@ -38,11 +38,12 @@ import {
   Gauge,
   Network,
   ArchiveRestore,
-  Cloud,
-  CloudOff,
   Import,
   RefreshCw,
   History,
+  PanelLeft,
+  PanelLeftOpen,
+  Search,
 } from 'lucide-react';
 import { examples, parse, type Diagnostic, type DiagramScenario, type DiagramUseCase, type SourceLoc } from '../../dsl';
 import { toFlowEdges } from '../../dsl/layout';
@@ -110,6 +111,9 @@ import { useKeyboardViewport } from './useKeyboardViewport';
 import { ZenButton, ZenCollapse, ZenStatus } from './Zen';
 import EditorZone from './EditorZone';
 import CloudSection, { CloudIcon } from './CloudStatus';
+import FileSidebar, { type FileActions } from './FileSidebar';
+import QuickOpen from './QuickOpen';
+import { addDocIn, brokenImports, docsInFolder, duplicateDoc, folderOf, moveDoc, removeFolder, renameFolder } from '../../playground/folders';
 import { useCloudSync } from './useCloudSync';
 import { useCloudFiles } from './useCloudFiles';
 import { withCloudErrors } from '../../playground/cloudRefs';
@@ -144,6 +148,9 @@ const LEGACY_SOURCE_KEY = 'proschi.playground.source';
 /** The splitter's position between the code and diagram panes. */
 const SPLIT_KEY = 'proschi.playground.split';
 const PARSE_DELAY_MS = 150;
+/** Whether the diagrams sidebar is open, on wider screens. */
+const FILES_KEY = 'proschi.playground.files';
+const MOD_KEY = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
 const VIEW_LABEL: Record<View, string> = { diagram: 'Diagram', results: 'Results', hld: 'HLD' };
 
 const nodeTypes = {
@@ -235,6 +242,10 @@ export default function Playground() {
   const [initialStep, setInitialStep] = useState(linkPlayback ? linkPlayback.step - 1 : undefined);
   const [playStep, setPlayStep] = useState(0);
   const [showExamples, setShowExamples] = useState(false);
+  /** The diagrams sidebar on wider screens (remembered); phones open it as a drawer instead. */
+  const [filesOpen, setFilesOpen] = useState(() => loadJson<boolean>(FILES_KEY, true));
+  const [drawer, setDrawer] = useState(false);
+  const [quickOpen, setQuickOpen] = useState(false);
   const [showShortLinks, setShowShortLinks] = useState(false);
   /** The short link made for a document and its imports, so asking again reuses it. */
   const shortLinkRef = useRef<{ key: string; id: string; url: string } | null>(null);
@@ -447,13 +458,71 @@ export default function Playground() {
     setSelectedScenarioId(undefined);
   };
 
-  const renameDocFile = (id: string, current: string) => {
-    const name = window.prompt('File name (used by import "…")', current);
-    if (name !== null) setDocState((s) => renameFile(s, id, name));
-  };
-
   const deleteDoc = (id: string, title: string) => {
     if (window.confirm(`Delete "${title}"? This cannot be undone.`)) openDoc((s) => removeDoc(s, id));
+  };
+
+  const toggleFiles = () => {
+    if (!window.matchMedia('(min-width: 768px)').matches) return setDrawer((d) => !d);
+    setFilesOpen((open) => {
+      saveJson(FILES_KEY, !open);
+      return !open;
+    });
+  };
+
+  /** Moves or renames files, then warns about the diagrams whose imports stopped finding a file. */
+  const changeFiles = (update: (s: DocumentState) => DocumentState) => {
+    const before = docStore.get();
+    const after = update(before);
+    if (after === before) return;
+    setDocState(after);
+    const broken = brokenImports(before.docs, after.docs);
+    if (broken.length === 0) return;
+    const names = broken.slice(0, 3).map((d) => `"${titleOf(d.source)}"`).join(', ');
+    setBanner({ tone: 'warning', message: `${names}${broken.length > 3 ? ` and ${broken.length - 3} more` : ''} ${broken.length === 1 ? 'has an import that no longer finds its file' : 'have imports that no longer find their files'}; update the import lines.` });
+  };
+
+  // Ctrl/Cmd+P: go to a diagram (instead of printing the page); Escape closes the phone drawer.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setDrawer(false);
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        setQuickOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const fileActions: FileActions = {
+    open: (id) => {
+      if (id !== docState.currentId) openDoc((s) => selectDoc(s, id));
+      setDrawer(false);
+    },
+    create: (folder) => {
+      openDoc((s) => addDocIn(s, BLANK_SOURCE, folder));
+      setDrawer(false);
+    },
+    renameFile: (id, base) =>
+      changeFiles((s) => {
+        const doc = s.docs.find((d) => d.id === id);
+        if (!doc) return s;
+        const folder = folderOf(fileNameOf(doc));
+        const clean = base.replace(/\//g, '-');
+        return renameFile(s, id, folder ? `${folder}/${clean}` : clean);
+      }),
+    move: (id, folder) => changeFiles((s) => moveDoc(s, id, folder)),
+    duplicate: (id) => openDoc((s) => duplicateDoc(s, id)),
+    remove: (id) => {
+      const doc = docStore.get().docs.find((d) => d.id === id);
+      if (doc) deleteDoc(id, titleOf(doc.source));
+    },
+    renameFolder: (from, to) => changeFiles((s) => renameFolder(s, from, to)),
+    removeFolder: (folder) => {
+      const n = docsInFolder(docStore.get().docs, folder).length;
+      if (window.confirm(`Delete the folder "${folder}" and the ${n} ${n === 1 ? 'diagram' : 'diagrams'} in it? This cannot be undone.`)) openDoc((s) => removeFolder(s, folder));
+    },
   };
 
   const importFile = async (file: File | undefined) => {
@@ -657,7 +726,9 @@ export default function Playground() {
   const openExample = (exampleSource: string, files?: Readonly<Record<string, string>>) =>
     openDoc((s) => {
       // An example picked while the current diagram is still empty takes its place instead of piling up "Untitled".
-      const next = isBlank(currentDoc(s).source) ? removeDoc(addDoc(s, exampleSource), s.currentId) : addDoc(s, exampleSource);
+      // It keeps that diagram's folder, as a folder made with "New folder" holds a blank diagram.
+      const blank = currentDoc(s);
+      const next = isBlank(blank.source) ? removeDoc(addDocIn(s, exampleSource, folderOf(fileNameOf(blank))), s.currentId) : addDoc(s, exampleSource);
       return files ? addFiles(next, files) : next;
     });
   const openHldExample = () => {
@@ -709,7 +780,6 @@ export default function Playground() {
 
   const canPlay = !!scenario && scenario.steps.length > 0;
   const problemCount = diagnostics.length;
-  const sortedDocs = [...docState.docs].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 
   return (
     <div
@@ -719,97 +789,48 @@ export default function Playground() {
       data-keyboard={keyboard.open || undefined}
     >
       <ZenCollapse zen={zen.zen}>
-        <Header base="../" current="editor" compact actions={<AccountMenu account={account} />}>
+        <Header base="../" current="editor" compact siteNav={false} actions={<AccountMenu account={account} />}>
         <div className="flex items-center gap-1 min-w-0 flex-1 sm:flex-none">
+          <button
+            type="button"
+            aria-label="Diagrams"
+            aria-pressed={filesOpen}
+            title="Show or hide the diagrams list (Ctrl+P to jump to one)"
+            onClick={toggleFiles}
+            className={`${toolButton} min-w-0 aria-pressed:md:bg-ink/10`}
+          >
+            <PanelLeft size={16} className="shrink-0" />
+            <span className="max-w-[7.5rem] sm:max-w-[14rem] truncate">{titleOf(source)}</span>
+            <CloudIcon state={cloud.state} />
+          </button>
           <Menu
-            label="Diagrams"
+            label="File"
             trigger={
               <>
-                <span className="max-w-[7.5rem] sm:max-w-[14rem] truncate">{titleOf(source)}</span>
-                <CloudIcon state={cloud.state} />
+                <span className="max-sm:hidden">File</span>
                 <ChevronDown size={14} />
               </>
             }
           >
             {(close) => (
               <>
-                <div className={`px-3 pt-1 pb-1.5 ${eyebrow}`}>{cloud.state.kind === 'saved' || cloud.state.kind === 'saving' ? 'Your diagrams' : 'Saved in this browser'}</div>
-                <ul className="max-h-72 overflow-y-auto">
-                  {sortedDocs.map((doc) => {
-                    const title = titleOf(doc.source);
-                    const syncing = cloud.enabled && (cloud.state.kind === 'saved' || cloud.state.kind === 'saving');
-                    const browserOnly = syncing && cloud.local.has(doc.id);
-                    return (
-                      <li key={doc.id} className="group flex items-center">
-                        <button
-                          role="menuitem"
-                          onClick={() => {
-                            openDoc((s) => selectDoc(s, doc.id));
-                            close();
-                          }}
-                          className={`flex-1 min-w-0 px-3 py-1.5 text-left text-sm hover:bg-ink/10 ${doc.id === docState.currentId ? 'font-bold text-ink shadow-[inset_4px_0_0_rgb(var(--c-pink))]' : 'text-ink/85'}`}
-                        >
-                          <span className="block truncate">{title}</span>
-                          <span className="block truncate text-xs font-normal text-muted">
-                            {browserOnly && (
-                              <span data-testid="browser-only" className="mr-1 rounded bg-ink/10 px-1 text-ink/80">
-                                This browser only
-                              </span>
-                            )}
-                            {fileNameOf(doc)} · {new Date(doc.updatedAt).toLocaleString()}
-                          </span>
-                        </button>
-                        {syncing &&
-                          (browserOnly ? (
-                            <button
-                              aria-label={`Keep ${title} in your account`}
-                              title={cloud.canKeep ? 'Keep in cloud' : 'Cloud full: move another diagram to this browser only first'}
-                              disabled={!cloud.canKeep}
-                              onClick={() => cloud.keepInCloud(doc.id)}
-                              className="p-1.5 rounded text-muted hover:text-ink hover:bg-ink/10 disabled:opacity-40 disabled:hover:bg-transparent"
-                            >
-                              <Cloud size={14} />
-                            </button>
-                          ) : (
-                            <button
-                              aria-label={`Move ${title} to this browser only`}
-                              title="Move to this browser only (frees a cloud slot)"
-                              onClick={() => {
-                                if (window.confirm(`Move "${title}" to this browser only? It is removed from your account and your other devices, and stays here.`)) cloud.moveToBrowser(doc.id);
-                              }}
-                              className="p-1.5 rounded text-muted hover:text-ink hover:bg-ink/10"
-                            >
-                              <CloudOff size={14} />
-                            </button>
-                          ))}
-                        <button
-                          aria-label={`Rename file ${fileNameOf(doc)}`}
-                          title="Rename the file imports refer to"
-                          onClick={() => renameDocFile(doc.id, fileNameOf(doc))}
-                          className="p-1.5 rounded text-muted hover:text-ink hover:bg-ink/10"
-                        >
-                          <Pencil size={14} />
-                        </button>
-                        <button
-                          aria-label={`Delete ${title}`}
-                          onClick={() => deleteDoc(doc.id, title)}
-                          className="mr-1 p-1.5 rounded text-muted hover:text-fail hover:bg-fail/10"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-                <div className="my-1 border-t border-ink/10" />
                 <MenuItem
                   icon={<FilePlus size={14} />}
                   onSelect={() => {
-                    openDoc((s) => addDoc(s, BLANK_SOURCE));
+                    fileActions.create(current ? folderOf(fileNameOf(current)) : '');
                     close();
                   }}
                 >
                   New diagram
+                </MenuItem>
+                <MenuItem
+                  icon={<Search size={14} />}
+                  onSelect={() => {
+                    setQuickOpen(true);
+                    close();
+                  }}
+                >
+                  Go to diagram… <span className="ml-auto text-xs text-muted">{MOD_KEY}+P</span>
                 </MenuItem>
                 <MenuItem
                   icon={<BookOpen size={14} />}
@@ -912,16 +933,6 @@ export default function Playground() {
         />
 
         <div className="ps-header__wrap flex items-center gap-2 w-full sm:w-auto sm:min-w-0 sm:flex-wrap sm:ml-auto">
-          <button
-            onClick={() => setShowExamples(true)}
-            aria-label="Examples"
-            // Phones keep the room for the use case picker; Examples… is in the Diagrams menu there.
-            className={`${toolButton} max-sm:hidden`}
-          >
-            <BookOpen size={16} />
-            <span className="hidden sm:inline">Examples</span>
-          </button>
-
           <select
             aria-label="Use case"
             value={useCase?.id ?? ''}
@@ -1085,10 +1096,24 @@ export default function Playground() {
         </div>
       </ZenCollapse>
 
+      <div className="flex flex-1 min-h-0">
+      {!zen.zen &&
+        (filesOpen ? (
+          <div className="max-md:hidden w-60 shrink-0 border-r-bw-1 border-ink">
+            <FileSidebar docs={docState.docs} currentId={docState.currentId} actions={fileActions} cloud={cloud} onCollapse={toggleFiles} />
+          </div>
+        ) : (
+          // Folded: a rail that brings the diagrams back.
+          <div className="max-md:hidden shrink-0 flex flex-col items-center gap-1 border-r-bw-1 border-ink bg-surface px-1 py-2">
+            <button type="button" aria-label="Show sidebar" title="Show sidebar" onClick={toggleFiles} className="p-1.5 rounded text-muted hover:text-ink hover:bg-ink/10">
+              <PanelLeftOpen size={16} />
+            </button>
+          </div>
+        ))}
       {/* Side by side on wider screens, with a splitter between; phones show one pane at a time (the tabs above). */}
       <Group
         id="playground-split"
-        className="flex-1 min-h-0 max-md:[&>[data-mobile-hidden]]:!hidden"
+        className="flex-1 min-h-0 min-w-0 max-md:[&>[data-mobile-hidden]]:!hidden"
         defaultLayout={splitLayout}
         onLayoutChanged={(layout, meta) => {
           if (!meta.isUserInteraction) return;
@@ -1226,6 +1251,24 @@ export default function Playground() {
           </section>
         </SplitPanel>
       </Group>
+      </div>
+
+      {drawer && (
+        <div className="md:hidden fixed inset-0 z-40 bg-black/40" onMouseDown={() => setDrawer(false)}>
+          <div className="h-full w-[min(20rem,85vw)] border-r-bw-2 border-ink shadow-brutal-lg" onMouseDown={(e) => e.stopPropagation()}>
+            <FileSidebar docs={docState.docs} currentId={docState.currentId} actions={fileActions} cloud={cloud} onClose={() => setDrawer(false)} />
+          </div>
+        </div>
+      )}
+
+      {quickOpen && (
+        <QuickOpen
+          docs={docState.docs}
+          currentId={docState.currentId}
+          onOpen={(id) => fileActions.open(id)}
+          onClose={() => setQuickOpen(false)}
+        />
+      )}
 
       {showExamples && (
         <Suspense fallback={<PaneLoading overlay />}>

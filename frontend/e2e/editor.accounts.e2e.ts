@@ -79,9 +79,12 @@ function allowStatus(errors: string[], status: number) {
 }
 
 async function openMenu(page: Page) {
-  await page.getByRole('button', { name: 'Diagrams' }).click();
+  await page.getByRole('button', { name: 'File' }).click();
   return page.getByRole('menu');
 }
+
+/** The diagrams sidebar. */
+const files = (page: Page) => page.getByRole('complementary', { name: 'Diagrams' });
 
 test('signed in, the diagrams sync with the account, and a conflict keeps both', async ({ page, errors }) => {
   const account = new Account();
@@ -95,8 +98,8 @@ test('signed in, the diagrams sync with the account, and a conflict keeps both',
   await expect.poll(() => account.docs.size).toBe(2);
   const localId = [...account.docs.keys()].find((id) => id !== 'cloud-1')!;
   expect(account.docs.get(localId)?.source).toContain('title "E-Commerce Platform"');
+  await expect(files(page)).toContainText('Cloud Diagram');
   let menu = await openMenu(page);
-  await expect(menu).toContainText('Cloud Diagram');
   await expect(menu.getByTestId('cloud-status')).toHaveText('Saved to your account');
   await page.keyboard.press('Escape');
 
@@ -128,9 +131,8 @@ test('signed in, the diagrams sync with the account, and a conflict keeps both',
   await menu.getByRole('menuitem', { name: 'Delete my cloud copies' }).click();
   await expect.poll(() => account.docs.size).toBe(0);
   expect(account.puts.length).toBe(puts);
-  menu = await openMenu(page);
-  await expect(menu).toContainText('Cloud Diagram');
-  await expect(menu).toContainText('Their Shop');
+  await expect(files(page)).toContainText('Cloud Diagram');
+  await expect(files(page)).toContainText('Their Shop');
   allowStatus(errors, 409);
 });
 
@@ -166,8 +168,8 @@ test('another account signing in: diagrams already in the browser are only added
   await expect(prompt).toBeHidden();
   await page.waitForTimeout(2500);
   expect(account.puts).toEqual([]);
+  await expect(files(page)).toContainText('Made Here');
   const menu = await openMenu(page);
-  await expect(menu).toContainText('Made Here');
   await menu.getByRole('menuitem', { name: 'Add 2 diagrams from this browser to your account' }).click();
   await expect.poll(() => account.docs.size).toBe(2);
 });
@@ -190,18 +192,21 @@ test('the account keeps a limited number of diagrams: the rest stay in this brow
   await expect.poll(() => [...account.docs.keys()].sort()).toEqual(['cloud-1', 'd3']);
   let menu = await openMenu(page);
   await expect(menu.getByTestId('cloud-status')).toHaveText('Cloud full: 2 of 2 — new diagrams stay in this browser');
-  const row = (title: string) => menu.getByRole('listitem').filter({ hasText: title });
-  await expect(row('Oldest').getByTestId('browser-only')).toHaveText('This browser only');
+  await page.keyboard.press('Escape');
+  const row = (title: string) => files(page).getByRole('listitem').filter({ hasText: title });
+  await expect(row('Oldest').getByTestId('browser-only')).toBeVisible();
   await expect(row('Middle').getByTestId('browser-only')).toBeVisible();
   await expect(row('Newest').getByTestId('browser-only')).toHaveCount(0);
-  await expect(menu.getByRole('button', { name: 'Keep Oldest in your account' })).toBeDisabled();
+  await files(page).getByRole('button', { name: 'Actions for Oldest' }).click();
+  await expect(page.getByRole('menuitem', { name: 'Account full: keep in your account' })).toBeDisabled();
+  await page.keyboard.press('Escape');
 
   // Moving one to this browser only frees its slot, which the next most recent takes.
   page.once('dialog', (dialog) => void dialog.accept());
-  await menu.getByRole('button', { name: 'Move Cloud Diagram to this browser only' }).click();
+  await files(page).getByRole('button', { name: 'Actions for Cloud Diagram' }).click();
+  await page.getByRole('menuitem', { name: 'Move to this browser only' }).click();
   await expect.poll(() => account.docs.get('cloud-1')?.deletedAt).not.toBeNull();
   await expect.poll(() => account.docs.get('d2')?.deletedAt).toBeNull();
-  await page.keyboard.press('Escape');
   menu = await openMenu(page);
   await expect(row('Cloud Diagram').getByTestId('browser-only')).toBeVisible();
   await expect(row('Middle').getByTestId('browser-only')).toHaveCount(0);
