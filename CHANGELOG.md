@@ -9,6 +9,19 @@ deployed from `main` and ships with the same changes. From 0.12.0 on,
 [release-please](https://github.com/googleapis/release-please) writes each
 section from the conventional commit titles of the merged pull requests.
 
+## [0.14.0](https://github.com/gvart/proschi/compare/tooling-v0.13.0...tooling-v0.14.0) (2026-11-01)
+
+
+### Added
+
+* diagram versions and cloud references ([#169](https://github.com/gvart/proschi/issues/169)) ([eea0e13](https://github.com/gvart/proschi/commit/eea0e13d288b733d5f7147485a8a64e761ae6fcb))
+
+
+### Fixed
+
+* **dsl:** the formatter keeps references to a system's entry points (orders.api) whole ([eea0e13](https://github.com/gvart/proschi/commit/eea0e13d288b733d5f7147485a8a64e761ae6fcb))
+* **editor:** save pulled diagrams before the sync state, so closing the tab right after a pull can no longer delete a diagram from the account ([eea0e13](https://github.com/gvart/proschi/commit/eea0e13d288b733d5f7147485a8a64e761ae6fcb))
+
 ## [0.13.0](https://github.com/gvart/proschi/compare/tooling-v0.12.0...tooling-v0.13.0) (2026-11-01)
 
 
