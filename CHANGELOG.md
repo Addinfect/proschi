@@ -9,6 +9,17 @@ deployed from `main` and ships with the same changes. From 0.12.0 on,
 [release-please](https://github.com/googleapis/release-please) writes each
 section from the conventional commit titles of the merged pull requests.
 
+## [0.13.0](https://github.com/gvart/proschi/compare/tooling-v0.12.0...tooling-v0.13.0) (2026-11-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* imports are confined to a root. Without a proschi.json and outside a git repository, a file can no longer import ../ paths above its own folder; add a proschi.json at the folder that should be the root.
+
+### Added
+
+* team system boxes and pinned imports across repositories ([#166](https://github.com/gvart/proschi/issues/166)) ([7102996](https://github.com/gvart/proschi/commit/7102996e292aceab13ef972979a167d128597b13))
+
 ## [0.12.0](https://github.com/gvart/proschi/compare/tooling-v0.11.0...tooling-v0.12.0) (2026-10-29)
 
 
