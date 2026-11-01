@@ -2,11 +2,12 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { layoutGraph } from '../../frontend/src/dsl/autoLayout';
 import { examples } from '../../frontend/src/dsl/examples';
-import { keyOf, loadDocument, missingImports, type Source } from '../src/terminal/document';
+import { importFilePath, keyOf, loadDocument, missingImports, parseSource, viewSource, type Source } from '../src/terminal/document';
+import { viewError, viewOptions, type SystemsView } from '../src/terminal/systems';
 import { DEFAULT, Grid, base64 } from '../src/terminal/grid';
 import { COLOR, heatOf, paint } from '../src/terminal/paint';
 import { currentStepsOf, playAt, stepPath } from '../src/terminal/playback';
-import { buildScene, type Rect, type Scene } from '../src/terminal/scene';
+import { buildScene, routePath, type Rect, type Scene } from '../src/terminal/scene';
 
 async function sceneOf(source: string, columns = 150) {
   const doc = loadDocument({ source });
@@ -296,10 +297,115 @@ describe('terminal document', () => {
     expect(missingImports({ source: 'import "shared/infra.proschi"\n', path: 'app/main.proschi' })).toEqual(['app/shared/infra.proschi']);
   });
 
+  it('reads imports only inside the project root, never remote ones', () => {
+    expect(importFilePath('/repo/docs', '/repo', '../shared/base.proschi')).toBe('/repo/shared/base.proschi');
+    expect(importFilePath('/repo/docs', '/repo', '../../etc/passwd')).toBeUndefined();
+    expect(importFilePath('/repo/docs', '/repo', '../../repo-other/x.proschi')).toBeUndefined();
+    expect(importFilePath('/repo/docs', '/repo', 'git:example.com/a/b//x.proschi@v1')).toBeUndefined();
+    expect(missingImports({ source: 'import "/etc/passwd"\n', path: 'main.proschi' })).toEqual([]);
+  });
+
   it('links to the editor, at a playback step when asked', () => {
     const doc = loadDocument({ source: examples[0].source });
     expect(doc.link()).toMatch(/^https:\/\/proschi\.app\/app\/#code=/);
     expect(doc.link({ useCase: 'x', step: 2 })).toContain('&step=2');
     expect(keyOf({ source: 'a' })).not.toBe(keyOf({ source: 'b' }));
+  });
+});
+
+/** The drone startup of sim/systems.test.ts, small: an org of four team systems; at 5.2k rps Orders saturates and Warehouse and Feed run hot. */
+function drone(file: 'org.proschi' | 'org-busy.proschi', view?: SystemsView): Source {
+  const dir = new URL('./fixtures/drone/', import.meta.url);
+  const teams = Object.fromEntries(readdirSync(new URL('teams/', dir)).map((f) => [`teams/${f}`, readFileSync(new URL(`teams/${f}`, dir), 'utf8')]));
+  return { source: readFileSync(new URL(file, dir), 'utf8'), path: file, imports: teams, ...(view ? { view } : {}) };
+}
+
+async function droneText(file: 'org.proschi' | 'org-busy.proschi', view?: SystemsView, columns = 100) {
+  const doc = loadDocument(drone(file, view));
+  const scene = buildScene(doc.diagram, await layoutGraph(viewSource(drone(file, view)).diagram), columns);
+  return { doc, scene, text: paint(scene, { overlay: doc.overlay, systems: doc.systems, icons: 'symbols' }).toText() };
+}
+
+describe('terminal systems', () => {
+  it('draws each team as a double-bordered box with its team, promise and sent / headroom', async () => {
+    const { doc, text } = await droneText('org.proschi');
+    expect(doc.notes).toEqual([]);
+    expect(doc.systems.orders).toMatchObject({ team: 'Orders', promise: 'p99 150 ms', sentRps: 100, status: 'ok' });
+    expect(text).toContain('╔');
+    expect(text).toContain('@Orders');
+    expect(text).toMatchSnapshot();
+  });
+
+  it('flags a system sent more than it takes, in red, with the warning and the hint', async () => {
+    const { doc, scene, text } = await droneText('org-busy.proschi');
+    expect(doc.systems.orders.status).toBe('saturated');
+    expect(doc.systems.warehouse.status).toBe('hot');
+    expect(doc.systems.frontend.status).toBe('ok');
+    expect(doc.notes[0].text).toMatch(/^'orders' cannot take what it is sent: you send 5\.2k rps into "Place order"/);
+    expect(doc.notes.find((n) => n.hint)?.hint).toBe('Send it less, or ask the Orders team to add capacity for it (their bottleneck is db)');
+    expect(text).toContain('✗ saturated');
+    expect(text).toContain('5.2k / 4.7k rps');
+    expect(text).toMatchSnapshot();
+    const grid = paint(scene, { overlay: doc.overlay, systems: doc.systems });
+    const { rect } = scene.nodes.get('orders')!;
+    expect(grid.fg[rect.y * grid.columns + rect.x]).toBe(COLOR.fail);
+    // Selected for the plugin's keys, its border is the accent.
+    const picked = paint(scene, { overlay: doc.overlay, systems: doc.systems, selected: 'orders' });
+    expect(picked.fg[rect.y * picked.columns + rect.x]).toBe(COLOR.pink);
+  });
+
+  it('opens an expanded system as a frame around its team design, under the load it is sent', async () => {
+    const { doc, text } = await droneText('org-busy.proschi', { expanded: ['orders'] });
+    expect(doc.diagram.nodes.find((n) => n.id === 'orders')?.kind).toBe('group');
+    expect(doc.overlay?.['orders.db']).toMatchObject({ saturated: true });
+    expect(text).toContain('ORDER PROCESSING ✗ saturated · @Orders');
+    expect(text).toMatchSnapshot();
+  });
+
+  it('enters an expanded frame straight, without a jog under its title', async () => {
+    for (const columns of [100, 160]) {
+      const { scene, text } = await droneText('org-busy.proschi', { expanded: ['orders', 'feed'] }, columns);
+      expect(text, `at ${columns}`).not.toMatch(/▼─|─▼|╰─+╮\n.*╔═ ORDER/);
+      const { cells } = scene.edges.find((e) => e.edge.target === 'orders.gateway')!.path;
+      expect(new Set(cells.map((c) => c.x)).size, `at ${columns}`).toBe(1);
+    }
+    // ELK's way in through a port on the frame: down, five cells over, through the title, and back.
+    const path = routePath([{ x: 10, y: 4 }, { x: 10, y: 6 }, { x: 15, y: 6 }, { x: 15, y: 8 }, { x: 10, y: 8 }, { x: 10, y: 10 }], { x: 0, y: 0, w: 20, h: 4 }, { x: 0, y: 10, w: 20, h: 5 })!;
+    expect(path.cells.every((c) => c.x === 10)).toBe(true);
+  });
+
+  it('drops the load, then the promise and the team, before cutting an expanded frame\'s name', async () => {
+    const title = (text: string) => text.split('\n').find((l) => l.includes('╔═ '))!.trim();
+    expect(title((await droneText('org-busy.proschi', { expanded: ['orders'] }, 160)).text)).toMatch(/^╔═ ORDER PROCESSING ✗ saturated · @Orders · p99 150 ms ═+╗$/);
+    expect(title((await droneText('org-busy.proschi', { expanded: ['orders'] }, 60)).text)).toMatch(/^╔═ ORDER PROCESSING ✗ saturated · @Orders ═+╗$/);
+    const { doc, scene } = await droneText('org-busy.proschi', { expanded: ['orders'] });
+    scene.nodes.get('orders')!.rect.w = 26;
+    const narrow = title(paint(scene, { overlay: doc.overlay, systems: doc.systems, icons: 'symbols' }).toText());
+    expect(narrow.slice(0, 26)).toBe('╔═ ORDER P… ✗ saturated ═╗');
+  });
+
+  it('focuses into a system: its own design, with what is said about it', async () => {
+    const { doc, text } = await droneText('org-busy.proschi', { focus: 'orders' });
+    expect(doc.diagram.title).toBe('Orders');
+    expect(doc.overlay?.db).toMatchObject({ saturated: true });
+    expect(doc.notes.map((n) => n.system)).toEqual(['orders', 'orders']);
+    expect(text).toMatchSnapshot();
+  });
+
+  it('fits the drone startup into 100 and 160 columns, collapsed, expanded and focused', async () => {
+    for (const view of [undefined, { expanded: ['orders'] }, { focus: 'orders' }])
+      for (const columns of [100, 160]) {
+        const { scene } = await droneText('org-busy.proschi', view, columns);
+        expect(scene.columns, `${JSON.stringify(view)} at ${columns}`).toBeLessThanOrEqual(columns);
+      }
+  });
+
+  it('names the systems when asked to open one that is not there', () => {
+    const { diagram } = parseSource(drone('org.proschi'));
+    expect(viewError(diagram, { expanded: ['orders'] })).toBeUndefined();
+    expect(viewError(diagram, { expanded: ['order'] })).toBe("No system 'order' to expand; the systems are frontend, orders, warehouse, feed.");
+    expect(viewError(diagram, { focus: 'shopper' })).toMatch(/^No system 'shopper' to focus/);
+    expect(viewOptions({ expanded: ['orders.wh'] }).expanded).toEqual(new Set(['orders', 'orders.wh']));
+    expect(keyOf(drone('org.proschi', { expanded: ['orders'] }))).not.toBe(keyOf(drone('org.proschi')));
   });
 });

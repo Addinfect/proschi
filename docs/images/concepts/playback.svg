@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="290" viewBox="0 0 640 290" role="img">
+<title>Playback of a use case with a par block: the parallel steps start together and the block lasts as long as its slowest step</title>
+<style>
+  .t { font-family: 'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif; fill: #111111; }
+  .m { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-ligatures: none; fill: #111111; }
+  .s { font-size: 13px; }
+  .xs { font-size: 12px; }
+  .b { font-weight: 700; }
+  .mut { fill: #5B5B5B; }
+  .bar { fill: #FFFFFF; stroke: #111111; stroke-width: 2; }
+  .sh { fill: #111111; }
+</style>
+<rect width="640" height="290" fill="#FFF8E7"/>
+
+<!-- steps -->
+<text x="20" y="55" class="m s">user -&gt; api</text><text x="136" y="55" class="m xs mut">POST /checkout</text>
+<text x="20" y="99" class="m s">api -&gt; db</text><text x="136" y="99" class="m xs mut">INSERT order</text>
+<text x="20" y="133" class="m s">api -&gt;&gt; events</text><text x="136" y="133" class="m xs mut">OrderPlaced</text>
+<text x="20" y="167" class="m s">api -&gt; mail</text><text x="136" y="167" class="m xs mut">SEND receipt</text>
+<text x="20" y="211" class="m s">api --&gt; user</text><text x="136" y="211" class="m xs mut">201</text>
+
+<!-- the timeline: 2.3 px per ms of the example -->
+<g transform="translate(14,0)">
+<rect x="254" y="74" width="226" height="108" rx="6" fill="#B69CFF" fill-opacity="0.16" stroke="#111111" stroke-width="2" stroke-dasharray="6 4"/>
+<rect x="254" y="64" width="34" height="20" rx="4" fill="#B69CFF" stroke="#111111" stroke-width="2"/>
+<text x="271" y="78" text-anchor="middle" class="m xs b">par</text>
+
+<rect x="243" y="43" width="23" height="18" rx="3" class="sh"/><rect x="240" y="40" width="23" height="18" rx="3" class="bar"/>
+<rect x="266" y="87" width="92" height="18" rx="3" class="sh"/><rect x="263" y="84" width="92" height="18" rx="3" class="bar"/>
+<rect x="263" y="118" width="18" height="18" rx="3" fill="#FFFFFF" stroke="#111111" stroke-width="2" stroke-dasharray="3 2"/>
+<text x="289" y="132" class="t xs mut">fire and forget</text>
+<rect x="266" y="155" width="207" height="18" rx="3" class="sh"/><rect x="263" y="152" width="207" height="18" rx="3" class="bar" style="fill:#FFD23F"/>
+<text x="366" y="166" text-anchor="middle" class="t xs b">slowest</text>
+<rect x="473" y="199" width="23" height="18" rx="3" class="sh"/><rect x="470" y="196" width="23" height="18" rx="3" class="bar"/>
+
+<line x1="400" y1="32" x2="400" y2="226" stroke="#3D5AFE" stroke-width="2"/>
+<path d="M393,24 L407,24 L400,33 Z" fill="#3D5AFE"/>
+<text x="410" y="30" class="t xs b" style="fill:#3D5AFE">playing</text>
+
+<rect x="263" y="252" width="317" height="14" rx="3" fill="#111111" fill-opacity="0.12"/>
+<line x1="470" y1="248" x2="470" y2="270" stroke="#111111" stroke-width="2"/>
+<text x="476" y="282" class="t xs b">par ends here</text>
+</g>
+
+<line x1="254" y1="238" x2="620" y2="238" stroke="#111111" stroke-width="2"/>
+<path d="M628,238 L618,233 L618,243 Z" fill="#111111"/>
+<text x="620" y="228" text-anchor="end" class="t xs mut">time</text>
+<text x="20" y="264" class="t xs mut">without par, one after another</text>
+</svg>

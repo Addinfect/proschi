@@ -8,6 +8,8 @@ export const NODE_TYPE: Record<DiagramNode['kind'], string> = {
   component: 'componentNode',
   group: 'groupNode',
   text: 'textNode',
+  // A collapsed system: its contract and status (Canvas/SystemNode.tsx).
+  system: 'systemNode',
 };
 
 const GRID_COLUMNS = 4;

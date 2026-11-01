@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="290" viewBox="0 0 640 290" role="img">
+<title>How load flows along a use case's steps</title>
+<style>
+  .t { font-family: 'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif; fill: #111111; }
+  .m { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #111111; }
+  .name { font-size: 15px; font-weight: 700; }
+  .load { font-size: 13px; font-weight: 600; }
+  .lbl { font-size: 12px; fill: #5B5B5B; }
+  .box { fill: #FFFFFF; stroke: #111111; stroke-width: 2; }
+  .sh { fill: #111111; }
+  .edge { fill: none; stroke: #5B5B5B; stroke-width: 2; }
+  .tip { fill: #5B5B5B; }
+  .chip { fill: #FFD23F; stroke: #111111; stroke-width: 2; }
+  .track { fill: #111111; fill-opacity: 0.1; }
+  .bar { fill: #111111; }
+  .hot { fill: #FF5DA2; }
+</style>
+<rect width="640" height="290" fill="#FFF8E7"/>
+
+<!-- traffic enters -->
+<rect x="20" y="28" width="150" height="34" rx="17" class="chip"/>
+<text x="95" y="50" text-anchor="middle" class="m load">100 rps</text>
+<text x="95" y="18" text-anchor="middle" class="t lbl">traffic "Post a photo"</text>
+<path d="M95,64 L95,112" class="edge"/><path d="M95,120 L90,110 L100,110 Z" class="tip"/>
+
+<!-- edges from the API -->
+<path d="M376,150 C408,150 404,62 440,62" class="edge"/><path d="M448,62 L438,57 L438,67 Z" class="tip"/>
+<path d="M376,150 L440,150" class="edge"/><path d="M448,150 L438,145 L438,155 Z" class="tip"/>
+<path d="M376,150 C408,150 404,238 440,238" class="edge"/><path d="M448,238 L438,233 L438,243 Z" class="tip"/>
+<path d="M170,150 L216,150" class="edge"/><path d="M224,150 L214,145 L214,155 Z" class="tip"/>
+<text x="197" y="140" text-anchor="middle" class="m lbl">POST</text>
+<text x="410" y="48" text-anchor="middle" class="m lbl">~2MB PUT</text>
+<text x="423" y="143" text-anchor="middle" class="m lbl">INSERT</text>
+<text x="410" y="268" text-anchor="middle" class="m lbl">x200 LPUSH</text>
+
+<!-- nodes: shadow, box, name, load, bar -->
+<rect x="23" y="125" width="147" height="56" rx="6" class="sh"/>
+<rect x="20" y="122" width="147" height="56" rx="6" class="box"/>
+<text x="32" y="145" class="t name">Mobile app</text>
+<text x="32" y="166" class="m load">sends 100 rps</text>
+
+<rect x="229" y="125" width="147" height="56" rx="6" class="sh"/>
+<rect x="226" y="122" width="147" height="56" rx="6" class="box"/>
+<text x="238" y="145" class="t name">Feed API</text>
+<text x="238" y="166" class="m load">100 rps</text>
+<rect x="320" y="159" width="42" height="8" rx="2" class="track"/><rect x="320" y="159" width="8" height="8" rx="2" class="bar"/>
+
+<rect x="453" y="37" width="167" height="56" rx="6" class="sh"/>
+<rect x="450" y="34" width="167" height="56" rx="6" class="box"/>
+<text x="462" y="57" class="t name">Photos</text>
+<text x="462" y="78" class="m load">100 rps</text>
+<rect x="564" y="71" width="42" height="8" rx="2" class="track"/><rect x="564" y="71" width="8" height="8" rx="2" class="bar"/>
+
+<rect x="453" y="125" width="167" height="56" rx="6" class="sh"/>
+<rect x="450" y="122" width="167" height="56" rx="6" class="box"/>
+<text x="462" y="145" class="t name">Posts DB</text>
+<text x="462" y="166" class="m load">100 rps</text>
+<rect x="564" y="159" width="42" height="8" rx="2" class="track"/><rect x="564" y="159" width="10" height="8" rx="2" class="bar"/>
+
+<rect x="453" y="213" width="167" height="56" rx="6" class="sh"/>
+<rect x="450" y="210" width="167" height="56" rx="6" class="box" style="fill:#FFF0F6"/>
+<text x="462" y="233" class="t name">Feed cache</text>
+<text x="462" y="254" class="m load">20k rps</text>
+<rect x="540" y="247" width="66" height="8" rx="2" class="track"/><rect x="540" y="247" width="52" height="8" rx="2" class="hot"/>
+</svg>

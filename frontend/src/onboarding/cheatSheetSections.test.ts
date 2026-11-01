@@ -6,7 +6,9 @@ import { nameTarget } from './nameTarget';
 import { ARROWS, CHEAT_SECTIONS, cheatSheetDocument } from './cheatSheetSections';
 import { STARTER_TEMPLATE } from './template';
 
-const languageMd = readFileSync(new URL('../../../docs/LANGUAGE.md', import.meta.url), 'utf8');
+const docsDir = new URL('../../../docs/', import.meta.url);
+const site = JSON.parse(readFileSync(new URL('site.json', docsDir), 'utf8')) as { pages: { slug: string; source: string }[] };
+const grammarMd = readFileSync(new URL('GRAMMAR.md', docsDir), 'utf8');
 
 /** GitHub's heading anchors: lowercase, punctuation dropped, spaces to dashes. */
 function anchors(markdown: string): Set<string> {
@@ -31,13 +33,17 @@ describe('syntax cheat-sheet', () => {
     expect(diagram.tests?.length ?? 0).toBeGreaterThan(0);
   });
 
-  it('links to sections that exist in docs/LANGUAGE.md', () => {
-    const known = anchors(languageMd);
-    for (const section of CHEAT_SECTIONS) expect(known, `${section.id} → ${section.ref}`).toContain(section.ref);
+  it('links to docs pages and sections that exist', () => {
+    for (const section of CHEAT_SECTIONS) {
+      const [, slug, anchor] = /^([a-z-]+)\/(#.+)?$/.exec(section.ref) ?? [];
+      const page = site.pages.find((p) => p.slug === slug);
+      expect(page, `${section.id} → ${section.ref}`).toBeDefined();
+      if (anchor) expect(anchors(readFileSync(new URL(page!.source, docsDir), 'utf8')), `${section.id} → ${section.ref}`).toContain(anchor);
+    }
   });
 
   it('lists exactly the arrows of the grammar', () => {
-    const production = languageMd.match(/^arrow\s*=(.*);/m);
+    const production = grammarMd.match(/^arrow\s*=(.*);/m);
     expect(production).not.toBeNull();
     const grammar = [...production![1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
     expect(ARROWS.map((a) => a.arrow).sort()).toEqual(grammar.sort());

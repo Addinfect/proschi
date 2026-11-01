@@ -72,7 +72,7 @@ group kafka "Kafka" rank 1 {
 audit "Audit log" [Database] rank last
 ```
 
-[Layout hints](https://proschi.app/docs/language/#steering-the-layout), in this order:
+[Layout hints](https://proschi.app/docs/styling/#steering-the-layout), in this order:
 1. Reading-order declarations + `layout ordered`: start every diagram so.
 2. `rank N|first|last` on group tiers (lower sits higher, among siblings;
    connected nodes can't share a row).

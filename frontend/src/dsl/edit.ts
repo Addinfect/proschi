@@ -19,7 +19,7 @@ export function setNodePosition(source: string, id: string, position: { x: numbe
   }
 
   const brace = tokens.findIndex((t) => t.kind === 'lbrace');
-  if (decl.node.kind === 'group' && brace !== -1) {
+  if ((decl.node.kind === 'group' || decl.node.kind === 'system') && brace !== -1) {
     return replaceInLine(source, decl.line, tokens[brace].col - 1, tokens[brace].col - 1, `${pos} `);
   }
   const last = end(tokens[tokens.length - 1]);
@@ -65,6 +65,7 @@ export function removeNode(source: string, id: string): EditResult {
   const node = diagram.nodes.find((n) => n.id === id);
   if (!node) return { source };
   if (node.kind === 'group') return { error: `"${node.name}" is a group; delete it in the text so its members are handled too.` };
+  if (node.kind === 'system') return { error: `"${node.name}" is a system; delete its block in the text.` };
   const useCase = diagram.useCases.find((u) =>
     u.scenarios.some((sc) => sc.steps.some((s) => s.fromServiceId === id || s.toServiceId === id)),
   );

@@ -1,0 +1,29 @@
+title "Order Processing"
+
+gateway "Gateway"     [AWS API Gateway]
+api     "Orders API"  [REST API]   x2
+db      "Orders DB"   [PostgreSQL]
+cache   "Stock cache" [Redis]
+
+gateway -> api   : HTTPS
+api     -> db    : SQL
+api     -> cache : RESP
+
+usecase "Place order" {
+  gateway -> api   : POST /orders
+  api     -> cache : GET stock:{sku}
+  api     -> db    : INSERT order
+  api    --> gateway : 201
+}
+
+traffic {
+  "Place order" 300 rps
+}
+
+capacity {
+  db 2k rps
+}
+
+requirements {
+  p99 "Place order" < 150ms
+}

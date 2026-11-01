@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="220" viewBox="0 0 640 220" role="img">
+<title>Headroom: how much more load a node takes before it runs hot and before it saturates</title>
+<style>
+  .t { font-family: 'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif; fill: #111111; }
+  .m { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #111111; }
+  .h { font-size: 15px; font-weight: 700; }
+  .s { font-size: 13px; }
+  .b { font-weight: 700; }
+  .mut { fill: #5B5B5B; }
+  .ink { stroke: #111111; stroke-width: 2; fill: none; }
+  .tick { stroke: #111111; stroke-width: 2; }
+</style>
+<rect width="640" height="220" fill="#FFF8E7"/>
+
+<text x="40" y="32" class="t h">Orders DB</text>
+<text x="124" y="32" class="m s mut">capacity 2k rps</text>
+
+<!-- the gauge: 0 at x=40, 2k at x=560 (0.26 px per rps) -->
+<rect x="43" y="59" width="560" height="30" rx="4" fill="#111111"/>
+<rect x="40" y="56" width="560" height="30" rx="4" fill="#FFFFFF"/>
+<rect x="404" y="56" width="156" height="30" fill="#FFE3EF"/>
+<rect x="560" y="56" width="40" height="30" fill="#FFD0CC"/>
+<rect x="40" y="56" width="312" height="30" rx="4" fill="#111111"/>
+<rect x="40" y="56" width="560" height="30" rx="4" class="ink"/>
+<line x1="404" y1="48" x2="404" y2="94" class="tick"/>
+<line x1="560" y1="48" x2="560" y2="94" class="tick" style="stroke:#D32F2F"/>
+<text x="196" y="76" text-anchor="middle" class="m s b" style="fill:#FFF8E7">sent 1.2k rps</text>
+<text x="482" y="76" text-anchor="middle" class="t s b" style="fill:#C2185B">hot</text>
+<text x="580" y="76" text-anchor="middle" class="t s b" style="fill:#D32F2F">✕</text>
+
+<text x="40" y="112" class="m s mut">0</text>
+<text x="404" y="112" text-anchor="middle" class="m s mut">1.4k (70%)</text>
+<text x="560" y="112" text-anchor="middle" class="m s mut">2k (100%)</text>
+
+<!-- headroom brackets, from the load sent now -->
+<line x1="352" y1="90" x2="352" y2="190" stroke="#111111" stroke-width="1.5" stroke-dasharray="4 3"/>
+<path d="M352,148 L404,148" class="ink"/><path d="M404,142 L404,154" class="tick"/>
+<text x="344" y="153" text-anchor="end" class="t s"><tspan class="b">+200 rps</tspan> before it runs hot</text>
+<path d="M352,184 L560,184" class="ink" style="stroke:#D32F2F"/><path d="M560,178 L560,190" class="tick" style="stroke:#D32F2F"/>
+<text x="344" y="189" text-anchor="end" class="t s"><tspan class="b">+800 rps</tspan> before it saturates</text>
+</svg>

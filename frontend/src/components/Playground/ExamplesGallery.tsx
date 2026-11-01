@@ -1,30 +1,32 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, Lock, Search, X } from 'lucide-react';
 import listings from 'virtual:practice-listings';
-import { examples, parse } from '../../dsl';
+import { examples, mapResolver, parse } from '../../dsl';
+import { DRONE_ORG_PATH, DRONE_TEAM_FILES, droneOrgSource } from '../../playground/droneStartup';
 import { TAG_ORDER, matchesGallery, patternTags, solutionSource, type GalleryItem } from '../../playground/gallery';
 import { loadProgress, statusOf } from '../../practice/progress';
 import { eyebrow, field } from './ui';
 
 interface ExamplesGalleryProps {
-  /** Opens a source as a new diagram. */
-  onPick: (source: string) => void;
+  /** Opens a source as a new diagram, with the files it imports (path → source) saved beside it. */
+  onPick: (source: string, files?: Readonly<Record<string, string>>) => void;
   onClose: () => void;
 }
 
-type Entry = GalleryItem & { source: string; stats: string };
+type Entry = GalleryItem & { source: string; files?: Readonly<Record<string, string>>; stats: string };
 
-function entryOf(id: string, title: string, description: string, source: string): Entry {
-  const { diagram } = parse(source);
+function entryOf(id: string, title: string, description: string, source: string, files?: Readonly<Record<string, string>>): Entry {
+  const { diagram } = parse(source, files ? { path: DRONE_ORG_PATH, resolve: mapResolver({ ...files }) } : undefined);
   const useCases = diagram.useCases.length;
   return {
     id,
     title,
     description,
     source,
+    ...(files ? { files } : {}),
     tags: patternTags(diagram),
     keywords: [...new Set(diagram.nodes.map((n) => n.techStack))].join(' '),
-    stats: `${diagram.nodes.filter((n) => n.kind === 'component').length} nodes · ${useCases} use case${useCases === 1 ? '' : 's'}`,
+    stats: `${diagram.nodes.filter((n) => n.kind === 'component' || n.kind === 'system').length} nodes · ${useCases} use case${useCases === 1 ? '' : 's'}`,
   };
 }
 
@@ -40,7 +42,14 @@ const card = 'ps-card text-left !p-4 !shadow-brutal-sm';
 export default function ExamplesGallery({ onPick, onClose }: ExamplesGalleryProps) {
   const [query, setQuery] = useState('');
   const [tag, setTag] = useState<string | undefined>();
-  const exampleEntries = useMemo(() => examples.map((e) => entryOf(e.id, e.name, e.description, e.source)), []);
+  const exampleEntries = useMemo(
+    () => [
+      ...examples.map((e) => entryOf(e.id, e.name, e.description, e.source)),
+      // An org diagram whose teams are systems, each team's design in its own file.
+      entryOf('drone-startup', 'Drone startup (team systems)', 'An org of teams, each a system box with its own design in a file: open one to edit it.', droneOrgSource(), DRONE_TEAM_FILES),
+    ],
+    [],
+  );
   const progress = useMemo(loadProgress, []);
   const solved = useMemo(() => listings.filter((p) => statusOf(progress, p.id) === 'solved'), [progress]);
   const locked = useMemo(() => listings.filter((p) => statusOf(progress, p.id) !== 'solved'), [progress]);
@@ -80,7 +89,7 @@ export default function ExamplesGallery({ onPick, onClose }: ExamplesGalleryProp
   const entryButton = (entry: Entry, solution: boolean) => (
     <button
       key={entry.id}
-      onClick={() => onPick(entry.source)}
+      onClick={() => onPick(entry.source, entry.files)}
       aria-label={solution ? `Reference solution: ${entry.title}` : entry.title}
       className={`${card} ps-card--interactive hover:!shadow-brutal-md`}
     >

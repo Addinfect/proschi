@@ -2,7 +2,7 @@
 // `siteHref` prefixes them with the page's way back to it ('./' or '../'),
 // so the links work under any sub-path, like the rest of the build.
 
-export type SitePage = 'home' | 'editor' | 'practice' | 'docs';
+export type SitePage = 'home' | 'editor' | 'practice' | 'docs' | 'blog';
 
 export interface SiteLink {
   label: string;
@@ -41,6 +41,7 @@ export const ARCADE_HREF = 'practice/#/arcade';
 export const NAV: SiteLink[] = [
   { label: 'Docs', href: 'docs/', page: 'docs' },
   { label: 'Practice', href: PRACTICE_HREF, page: 'practice', accent: true },
+  { label: 'Blog', href: 'blog/', page: 'blog' },
   { label: 'GitHub', href: GITHUB_URL },
 ];
 
@@ -72,6 +73,7 @@ export const FOOTER_COLUMNS: { title: string; links: SiteLink[] }[] = [
     title: 'Project',
     links: [
       { label: 'GitHub', href: GITHUB_URL },
+      { label: 'Blog', href: 'blog/' },
       { label: 'Contribute', href: CONTRIBUTING_URL },
       { label: 'Issues', href: `${GITHUB_URL}/issues` },
       { label: 'Privacy', href: 'docs/privacy/' },

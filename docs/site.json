@@ -1,47 +1,107 @@
 {
-  "$comment": "The docs on the site (/docs/), built from these files by frontend/plugins/docsSite.ts. `pages` lists the pages; `source` is relative to this folder. The previous / next links follow the sidebar (`nav`) order. Every page needs a stub at frontend/docs/<slug>/index.html (the docs home: frontend/docs/index.html). `nav` is the sidebar: an item names a page (with an optional anchor), or an `href` from the site root or an absolute URL.",
+  "$comment": "The docs on the site (/docs/), built from these files by frontend/plugins/docsSite.ts. `pages` lists the pages; `source` is relative to this folder. The previous / next links follow the sidebar (`nav`) order. Every page needs a stub at frontend/docs/<slug>/index.html (the docs home: frontend/docs/index.html). `anchorRedirects` maps, per page slug, an old anchor to where it lives now, relative to /docs/ (\"hld/#traffic\" or \"scenarios/\"); the page follows it in the browser. `nav` is the sidebar: an item names a page (with an optional anchor), or an `href` from the site root or an absolute URL.",
   "pages": [
     {
       "slug": "",
-      "title": "Why Proschi",
+      "title": "Proschi: architecture diagrams as code",
+      "source": "README.md",
+      "description": "Proschi turns a few lines of text into an architecture diagram you can play and test. Hover each line of the example to see what it draws."
+    },
+    {
+      "slug": "why",
+      "title": "Why architecture diagrams as text",
       "source": "WHY.md",
-      "description": "What Proschi is for: architecture diagrams as text, request flows you can play, and designs checked by a simulation in your browser."
+      "description": "Why write architecture diagrams as text: they diff in pull requests, lay themselves out, play request flows and check the design with a simulation."
     },
     {
       "slug": "quickstart",
-      "title": "Quickstart",
+      "title": "Quickstart: your first Proschi diagram",
       "source": "QUICKSTART.md",
-      "description": "Your first Proschi diagram in two minutes: services, a request flow, a failure, and a requirement that checks itself."
+      "description": "Write your first Proschi diagram in two minutes: two services, a request that flows between them, a failure, and a requirement that checks itself."
     },
     {
       "slug": "language",
-      "title": "Language reference",
+      "title": "Proschi language reference",
       "source": "LANGUAGE.md",
-      "description": "The Proschi language: nodes, groups, connections, use cases, scenarios, imports and the high-level design blocks, with the grammar."
+      "description": "The Proschi language at a glance: every statement with its syntax, a complete example, and links to the page that explains each part in detail."
+    },
+    {
+      "slug": "nodes",
+      "title": "Nodes, groups and connections",
+      "source": "NODES.md",
+      "description": "Declare nodes, groups and connections in Proschi: ids, display names, tech stacks from the catalog, replicas, owners and descriptions."
+    },
+    {
+      "slug": "styling",
+      "title": "Colors, legend and layout",
+      "source": "STYLING.md",
+      "description": "Style a Proschi diagram with colors, tags and a legend, steer the automatic layout with direction and rank, and see how canvas edits change the text."
+    },
+    {
+      "slug": "use-cases",
+      "title": "Use cases: request flows step by step",
+      "source": "USE-CASES.md",
+      "description": "Write Proschi use cases: request flows step by step, with endpoints, payloads, statuses, fan-out, and the reads and writes the simulation counts."
+    },
+    {
+      "slug": "scenarios",
+      "title": "Scenarios: success and failure paths",
+      "source": "SCENARIOS.md",
+      "description": "Branch a Proschi use case into scenarios with alt: the success path and every way it fails, side by side, plus parallel steps and endpoint groups."
+    },
+    {
+      "slug": "imports",
+      "title": "Imports: split a design across files",
+      "source": "IMPORTS.md",
+      "description": "Split a Proschi design across files with import: the project root, remote sources, syncing them into a lock file, the security model and errors."
+    },
+    {
+      "slug": "systems",
+      "title": "Org diagrams and team systems",
+      "source": "SYSTEMS.md",
+      "description": "Draw each team's design as one box, connect the teams, and let the simulation say which team cannot take the traffic you send to it."
+    },
+    {
+      "slug": "hld",
+      "title": "High-level design: traffic and capacity",
+      "source": "HLD.md",
+      "description": "Add a high-level design to a Proschi diagram: quantities, traffic, capacity per node, the data model and decisions, all checked by the simulation."
+    },
+    {
+      "slug": "tests",
+      "title": "Requirements and tests for designs",
+      "source": "TESTS.md",
+      "description": "Check a Proschi design with requirements and tests: latency, availability, cost and survival limits, assertions on request flows, and selectors."
+    },
+    {
+      "slug": "grammar",
+      "title": "Proschi grammar (EBNF)",
+      "source": "GRAMMAR.md",
+      "description": "The complete Proschi grammar in EBNF: every statement, block, arrow and payload rule of the language on one page, for tool builders and quick lookups."
     },
     {
       "slug": "model",
       "title": "How the simulation works",
       "source": "../frontend/src/docs/model.html",
-      "description": "What Proschi's simulation models (load, reads and writes, replicas and shards, queueing, percentiles, availability, cost), what it leaves out, and how far to trust its numbers."
+      "description": "What Proschi's simulation models (load, replicas, queueing, percentiles, availability, cost), what it leaves out, and how far to trust its numbers."
     },
     {
       "slug": "editors",
-      "title": "Editor support",
+      "title": "Editor support: VS Code, IntelliJ, Neovim",
       "source": "EDITORS.md",
-      "description": "Proschi in VS Code, IntelliJ, Neovim, Helix and Sublime Text, on the command line and in CI: checking, formatting, OpenAPI, rendering and tests."
+      "description": "Proschi in VS Code, IntelliJ, Neovim, Helix and Sublime Text, and the proschi command line for CI: checking, formatting, rendering and tests."
     },
     {
       "slug": "sharing",
-      "title": "Sharing and embedding",
+      "title": "Sharing and embedding diagrams",
       "source": "SHARING.md",
       "description": "Share a Proschi diagram as a link, as a short link with a preview image, or embed it read-only in a blog post, a wiki or docs with an iframe or oEmbed."
     },
     {
       "slug": "agents",
-      "title": "Agent skills",
+      "title": "Agent skills for Proschi diagrams",
       "source": "AGENT-SKILLS.md",
-      "description": "Skills for Claude Code, Codex, Cursor, Copilot and Gemini CLI that turn docs, Terraform, Kubernetes, docker-compose and code into checked Proschi diagrams."
+      "description": "Skills for Claude Code, Codex, Cursor, Copilot and Gemini CLI that turn docs, Terraform, Kubernetes and code into checked Proschi diagrams."
     },
     {
       "slug": "numbers",
@@ -74,20 +134,62 @@
       "description": "What Proschi keeps in your browser, what an account stores on the server, what is logged and shared, and how to export or delete it."
     }
   ],
+  "anchorRedirects": {
+    "": { "why-text": "why/#why-text", "start-here": "why/" },
+    "language": {
+      "tech-stacks": "nodes/#tech-stacks",
+      "colors-and-legend": "styling/#colors-and-legend",
+      "steering-the-layout": "styling/#steering-the-layout",
+      "use-case-steps": "use-cases/",
+      "fan-out-and-payload-size": "use-cases/#fan-out-and-payload-size",
+      "reads-and-writes": "use-cases/#reads-and-writes",
+      "steps-follow-the-architecture": "use-cases/#steps-follow-the-architecture",
+      "scenarios": "scenarios/",
+      "parallel-steps": "scenarios/#parallel-steps",
+      "grouping-by-endpoint": "scenarios/#grouping-by-endpoint",
+      "imports": "imports/",
+      "the-project-root": "imports/#the-project-root",
+      "remote-sources": "imports/#remote-sources",
+      "syncing-remote-imports": "imports/#syncing-remote-imports",
+      "security-model-for-imports": "imports/#security-model-for-imports",
+      "import-errors": "imports/#import-errors",
+      "systems": "systems/#the-system-block",
+      "high-level-design": "hld/",
+      "quantities": "hld/#quantities",
+      "traffic": "hld/#traffic",
+      "capacity": "hld/#capacity",
+      "entities": "hld/#entities",
+      "decisions": "hld/#decisions",
+      "requirements": "tests/#requirements",
+      "tests": "tests/#tests",
+      "selectors-and-kinds": "tests/#selectors-and-kinds",
+      "editing-on-the-canvas": "styling/#editing-on-the-canvas",
+      "links": "sharing/#links-that-carry-the-diagram",
+      "grammar": "grammar/"
+    }
+  },
   "nav": [
     {
       "title": "Start",
-      "items": [{ "page": "" }, { "page": "quickstart" }]
+      "items": [
+        { "page": "", "label": "Overview" },
+        { "page": "quickstart", "label": "Quickstart" },
+        { "page": "why", "label": "Why Proschi" }
+      ]
     },
     {
       "title": "Language",
       "items": [
-        { "page": "language", "label": "Reference" },
-        { "page": "language", "anchor": "use-case-steps", "label": "Use case steps" },
-        { "page": "language", "anchor": "scenarios", "label": "Scenarios" },
-        { "page": "language", "anchor": "high-level-design", "label": "High-level design" },
-        { "page": "language", "anchor": "tests", "label": "Tests" },
-        { "page": "language", "anchor": "grammar", "label": "Grammar" }
+        { "page": "language", "label": "Overview" },
+        { "page": "nodes", "label": "Nodes and connections" },
+        { "page": "styling", "label": "Colors and layout" },
+        { "page": "use-cases", "label": "Use cases" },
+        { "page": "scenarios", "label": "Scenarios" },
+        { "page": "imports", "label": "Imports" },
+        { "page": "systems", "label": "Org diagrams" },
+        { "page": "hld", "label": "High-level design" },
+        { "page": "tests", "label": "Requirements and tests" },
+        { "page": "grammar", "label": "Grammar" }
       ]
     },
     {
@@ -128,6 +230,7 @@
       "title": "About",
       "items": [
         { "page": "privacy" },
+        { "href": "blog/", "label": "Blog" },
         { "href": "https://github.com/gvart/proschi/blob/main/CHANGELOG.md", "label": "Changelog" },
         { "href": "https://github.com/gvart/proschi", "label": "GitHub" }
       ]

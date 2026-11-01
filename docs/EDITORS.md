@@ -1,30 +1,28 @@
 # Editor support
 
-Proschi works in your own editor and in CI, not only in the browser. The
-editor plugins, the command line and the web editor all run the same parser,
-so they always agree on what is valid.
+Proschi runs in your own editor and in CI as well as in the browser. The
+editor plugins, the `proschi` command line and the web editor share one
+parser, so they agree on what is valid.
 
 | Editor | Install |
 |---|---|
 | IntelliJ IDEA, WebStorm, PyCharm and other JetBrains IDEs | [Proschi on the JetBrains Marketplace](https://plugins.jetbrains.com/plugin/34955-proschi) |
-| VSCodium, Cursor, Windsurf, Gitpod and other editors that use Open VSX | [Proschi on Open VSX](https://open-vsx.org/extension/gvart/proschi) |
-| VS Code | The `.vsix` file from [Open VSX](https://open-vsx.org/extension/gvart/proschi) (see [VS Code](#vs-code)) |
-| Neovim, Helix, Sublime Text and any editor with a language server client | The `proschi` npm package, then a few lines of setup (below) |
+| VSCodium, Cursor, Windsurf, Gitpod and other Open VSX editors | [Proschi on Open VSX](https://open-vsx.org/extension/gvart/proschi) |
+| VS Code | The `.vsix` file from Open VSX (see [VS Code](#vs-code)) |
+| Neovim, Helix, Sublime Text, any editor with a language server client | The `proschi` npm package and a few lines of setup (below) |
 
-Everything else is built on three pieces:
+Every plugin is built on two pieces from the `proschi` package:
 
-- **A language server** (`proschi-language-server`): errors and warnings as
-  you type, quick fixes (add a missing connection, replace an unknown tech
-  stack), completion of keywords, node ids and the whole tech catalog, hover,
-  go to definition, find references, outline, formatting and failing
+- **The language server** (`proschi-language-server`): errors and warnings
+  as you type, quick fixes (add a missing connection, replace an unknown
+  tech stack), completion of keywords, node ids and tech stacks, hover, go
+  to definition, find references, outline, formatting, and failing
   requirements and tests.
-- **A command line** (`proschi`): checks files in CI and pre-commit hooks,
-  optionally [against OpenAPI specs](#checking-against-openapi); formats them;
-  renders SVG, Markdown and HTML (see [Rendering and export](#rendering-and-export));
-  runs requirements and tests (see [Simulation and tests](#simulation-and-tests)).
-- **A TextMate grammar** for syntax highlighting, and a JSON Schema of the
-  parsed diagram for tools in any language. Both are in the
-  [Proschi repository](https://github.com/gvart/proschi/tree/main/tooling).
+- **The command line** (`proschi`): checks, formats, renders and tests files
+  in CI and pre-commit hooks.
+
+A TextMate grammar for highlighting and a JSON Schema of the parsed diagram
+are in the [Proschi repository](https://github.com/gvart/proschi/tree/main/tooling).
 
 ## Install
 
@@ -39,52 +37,53 @@ npx proschi check docs/    # or run it without installing
 ## VS Code
 
 Editors that use Open VSX (VSCodium, Cursor, Windsurf, Gitpod) find
-**Proschi** in their Extensions view, or install it from
-[Open VSX](https://open-vsx.org/extension/gvart/proschi).
+**Proschi** in their Extensions view.
 
 In VS Code, download the `.vsix` from the
-[Open VSX page](https://open-vsx.org/extension/gvart/proschi) (*Download*),
-then *Extensions view → … → Install from VSIX…*, or run
-`code --install-extension proschi-<version>.vsix`. Every
-[GitHub release](https://github.com/gvart/proschi/releases) has the same file.
+[Open VSX page](https://open-vsx.org/extension/gvart/proschi) (**Download**),
+then **Extensions → … → Install from VSIX…**, or run:
 
-The extension bundles the grammar and the language server; nothing else is
-needed.
+```sh
+code --install-extension proschi-<version>.vsix
+```
+
+Every [GitHub release](https://github.com/gvart/proschi/releases) has the
+same file. The extension bundles the grammar and the language server.
+
+**Proschi: Open Preview to the Side** (the preview button in the editor
+title bar) opens the architecture and a scenario picker with that
+scenario's sequence diagram. It updates as you type. While the document has
+errors, it lists them above the last good rendering.
 
 ## IntelliJ IDEA and other JetBrains IDEs
 
-### The Proschi plugin
-
-Install [Proschi from the JetBrains Marketplace](https://plugins.jetbrains.com/plugin/34955-proschi):
-*Settings → Plugins → Marketplace*, search for **Proschi**. It works in
-JetBrains IDEs 2025.3 and newer (IntelliJ IDEA in the free and paid tiers,
-WebStorm, PyCharm, GoLand and the others) and brings:
+Install [Proschi from the JetBrains Marketplace](https://plugins.jetbrains.com/plugin/34955-proschi)
+under **Settings → Plugins → Marketplace**. It works in JetBrains IDEs
+2025.3 and newer and brings:
 
 - highlighting, bracket matching and comment toggling;
-- the language server through the IDE's built-in LSP client: errors and
-  warnings as you type, quick fixes, completion, hover, go to definition,
-  find usages, *Structure*, and formatting with *Reformat Code*;
-- *Tools → Proschi*: *Check File*, *Run Tests*, *Show Diagram Preview* (renders
-  each time you save) and *Open in Proschi* (the web editor with the diagram
-  in the link).
+- the language server through the IDE's LSP client, with **Structure** and
+  **Reformat Code**;
+- **Tools → Proschi**: **Check File**, **Run Tests**, **Show Diagram
+  Preview** (redrawn on save) and **Open in Proschi**.
 
-It needs Node.js 18 or newer. It runs the language server and the command
-line from PATH (`npm install -g proschi`), or else through `npx`. You can set
-the paths in *Settings → Languages & Frameworks → Proschi*.
+It needs Node.js 18 or newer, and runs `proschi` from `PATH`, else through
+`npx`. Set other paths in **Settings → Languages & Frameworks → Proschi**.
 
-### Without the plugin (LSP4IJ)
+### Older IDEs, through LSP4IJ
 
-For IntelliJ IDEA open-source builds, Android Studio or IDE versions before
-2025.3, which the plugin doesn't support:
+For IntelliJ IDEA open-source builds, Android Studio or versions before
+2025.3:
 
-1. **Highlighting.** Download the `.vsix` from
-   [Open VSX](https://open-vsx.org/extension/gvart/proschi) and unzip it (it is a zip file), then
-   *Settings → Editor → TextMate Bundles → +* and pick its `extension` folder.
-2. **Validation and completion.** Install the
-   [LSP4IJ](https://plugins.jetbrains.com/plugin/23257-lsp4ij) plugin, then
-   *Settings → Languages & Frameworks → Language Servers → +*:
-   - **Server** tab: name `Proschi`, command `proschi-language-server --stdio`
-   - **Mappings** tab → *File name patterns*: pattern `*.proschi`, language id `proschi`
+1. **Highlighting.** Unzip the `.vsix` from
+   [Open VSX](https://open-vsx.org/extension/gvart/proschi), then add its
+   `extension` folder under **Settings → Editor → TextMate Bundles → +**.
+2. **Language server.** Install
+   [LSP4IJ](https://plugins.jetbrains.com/plugin/23257-lsp4ij), then add a
+   server under **Settings → Languages & Frameworks → Language Servers → +**
+   with the command `proschi-language-server --stdio`, and on the
+   **Mappings** tab the file name pattern `*.proschi` with language id
+   `proschi`.
 
 ## Neovim (0.11+)
 
@@ -100,7 +99,7 @@ vim.lsp.enable('proschi')
 
 ## Helix
 
-`~/.config/helix/languages.toml`:
+In `~/.config/helix/languages.toml`:
 
 ```toml
 [language-server.proschi]
@@ -117,10 +116,9 @@ language-servers = ["proschi"]
 
 ## Sublime Text
 
-Download the grammar,
-[proschi.tmLanguage.json](https://github.com/gvart/proschi/blob/main/tooling/grammar/proschi.tmLanguage.json),
-into your *Packages/User* folder for highlighting. For validation, install the LSP package and add to
-*LSP.sublime-settings*:
+Save [proschi.tmLanguage.json](https://github.com/gvart/proschi/blob/main/tooling/grammar/proschi.tmLanguage.json)
+into your `Packages/User` folder for highlighting. For the language server,
+install the LSP package and add this to `LSP.sublime-settings`:
 
 ```json
 {
@@ -137,22 +135,31 @@ into your *Packages/User* folder for highlighting. For validation, install the L
 ## CI
 
 ```sh
-proschi check docs/                        # every *.proschi below docs/
+proschi imports sync --frozen              # only when the diagrams have git: or https:// imports
 proschi check --strict --format github .   # warnings fail too; GitHub annotations
+proschi fmt --check .                      # fails when a file is not formatted
+proschi test --format github .             # requirements and tests
 ```
 
-`check` exits with 1 when a file has an error (with `--strict`, also a
-warning) and 2 on bad usage. `--format json` prints machine-readable results.
+Directories are searched for `*.proschi` files, skipping dot folders and
+`node_modules`.
 
-To keep files in the canonical layout, add `proschi fmt --check docs/` (see
-[Formatting](#formatting)). To hold designs to their requirements, add
-`proschi test --format github docs/` (see [Simulation and tests](#simulation-and-tests)).
+| Command | Exit 1 when | Formats |
+|---|---|---|
+| `check` | a file has an error, or a warning with `--strict` | `text`, `github`, `json` |
+| `fmt --check` | a file is not in the canonical layout | text |
+| `test` | a requirement or test fails, or a file has errors | `text`, `github`, `json` |
+| `imports sync --frozen` | `proschi.lock` is missing or would change | text |
+
+Every command exits with 2 on bad usage. `proschi parse <file>` prints
+`{"diagram": …, "diagnostics": […]}` as JSON that matches the JSON Schema,
+so other tools can read the nodes, edges and use cases.
 
 ### GitHub Action
 
-`gvart/proschi/action` checks and tests the diagrams in a repository and, on
-pull requests, keeps one comment up to date with what the changed diagrams
-look like now:
+`gvart/proschi/action` checks and tests the diagrams in a repository. On a
+pull request it keeps one comment up to date with what the changed diagrams
+look like now.
 
 ```yaml
 # .github/workflows/proschi.yml
@@ -173,92 +180,72 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: gvart/proschi/action@tooling-v0.9.0
+      - uses: gvart/proschi/action@tooling-v0.12.0
         with:
           files: docs/**/*.proschi   # default **/*.proschi
 ```
 
-It runs `proschi check --format github` and `proschi test --format github`
-on the matched files, so errors and failing requirements show up as
-annotations on their lines, and fails the job when a file has an error or a
-requirement or test fails. Warnings never fail it.
+It runs `proschi check --format github` and `proschi test --format github`,
+so errors and failing requirements show as annotations on their lines. The
+job fails on an error or a failing requirement or test. Warnings never fail
+it.
 
-On a pull request it posts one comment (found again by a hidden marker and
-edited on every push, never duplicated) with a row per changed `.proschi`
-file: nodes, tests passed, requirements met, the monthly cost and the worst
-p99 latency from `proschi analyze` (for documents with traffic), and an
-*Open in Proschi* link that opens the file, with the files it imports, in the
-web editor. The link is the same `#code=` link the editor's *Share* button
-copies (`proschi share-link <file>` prints it); nothing is uploaded. Below the
-table come the failing requirements and tests, and each diagram as Mermaid.
-The same summary goes to the job summary on every run, and the SVGs
-(architecture and one per scenario) to a workflow artifact.
+The comment has a row per changed `.proschi` file: nodes, tests passed,
+requirements met, and, with traffic, the monthly cost and worst p99. Each
+row has an **Open in Proschi** link, the same `#code=` link that
+`proschi share-link <file>` prints, so nothing is uploaded. Below come the
+failing checks and each diagram as Mermaid. The same summary goes to the job
+summary, and the SVGs to a workflow artifact.
 
-| Input | Default | |
+| Input | Default | Meaning |
 |---|---|---|
-| `files` | `**/*.proschi` | Globs, one per line or comma-separated; `!` excludes. Dot directories and `node_modules` are skipped |
-| `test` | `true` | Also run requirements and tests (`proschi test`) |
-| `openapi` | | `node=path/to/spec.yaml` per line, like `check --openapi` (a `proschi.json` next to the files works too, see [Checking against OpenAPI](#checking-against-openapi)) |
+| `files` | `**/*.proschi` | Globs, one per line or comma-separated; `!` excludes |
+| `test` | `true` | Also run `proschi test` |
+| `openapi` | none | `node=path/to/spec.yaml` per line, like `check --openapi` |
 | `comment` | `true` | Comment on pull requests |
 | `render` | `true` | Upload the changed diagrams as SVGs |
-| `version` | the release of the tag | The `proschi` npm version to run, e.g. `0.9.0` or `latest` |
+| `version` | the release of the tag | The `proschi` npm version, e.g. `0.12.0` or `latest` |
+| `cli` | none | A built `dist/cli.cjs` to run instead of the npm package |
 | `token` | `github.token` | The token for the comment |
 
-Outputs: `check-failed` and `test-failed` (`true`/`false`) and
+Outputs: `check-failed`, `test-failed` (`true` or `false`) and
 `artifact-url`.
 
-Permissions: the comment needs `pull-requests: write` on the job's
-`GITHUB_TOKEN`. Without it, and on pull requests from forks (whose token is
-always read-only), the action skips the comment with a notice and the summary
-stays in the job summary; the checks still run. It never pushes to the
-repository.
+The comment needs `pull-requests: write`. Without it, and on pull requests
+from forks (whose token is read-only), the action skips the comment with a
+notice and the checks still run. It never pushes to the repository.
 
-The action lives in the Proschi repository, so it is referenced as
-`gvart/proschi/action@<ref>`. Each `tooling-v<version>` tag pins the action
-and the `proschi` version it runs; a branch such as `@main` runs the version
-on that branch, or the latest release while that one is not on npm yet.
-
-Elsewhere, call the CLI directly:
-
-```yaml
-- run: npx proschi check --format github docs/
-- run: npx proschi test --format github docs/
-```
-
-### Parsing
-
-`proschi parse diagram.proschi` prints `{"diagram": …, "diagnostics": […]}`. It
-matches the JSON Schema, so other tools can read nodes, edges, use cases and
-scenarios without reimplementing the language.
+Each `tooling-v<version>` tag pins the action and the `proschi` version it
+runs. A branch such as `@main` runs that branch's version. On other CI
+systems, run `npx proschi check` and `npx proschi test` directly.
 
 ## Formatting
 
-`proschi fmt` rewrites files in the canonical layout: two spaces per open block,
-aligned columns in runs of node declarations and of connections, single blank
-lines and one trailing newline. Strings, labels, comments and multi-line
-payloads are kept as written (payloads move with their step's indentation), and
-so are lines with syntax errors, so formatting never changes what a file means.
+`proschi fmt` rewrites files in the canonical layout: two spaces per block,
+aligned columns in runs of nodes and of connections, single blank lines and
+one trailing newline. It keeps strings, labels, comments, payloads and lines
+with syntax errors as written, so formatting never changes what a file
+means.
 
 ```sh
-proschi fmt docs/                  # rewrite every *.proschi below docs/; lists the files it changed
-proschi fmt --check docs/          # write nothing; list files that need formatting, exit 1 if any
+proschi fmt docs/            # rewrite every *.proschi below docs/ and list the changed files
+proschi fmt --check docs/    # write nothing; list the files that need it, exit 1 if any
 ```
 
-In CI, `proschi fmt --check .` next to `proschi check .` fails the build when a
-file is not formatted. Directories are searched the same way as for `check`.
-
-In editors, formatting comes from the language server
-(`textDocument/formatting`): *Format Document* (Shift+Alt+F) in VS Code,
-`vim.lsp.buf.format()` in Neovim, `:format` in Helix, *Reformat Code* with LSP4IJ
-in IntelliJ, *LSP: Format File* in Sublime Text. In the web editor, use
-**Diagrams → Format code** or Shift+Alt+F.
+| Where | Format with |
+|---|---|
+| Web editor | **Diagrams → Format code**, or Shift+Alt+F |
+| VS Code | **Format Document** (Shift+Alt+F) |
+| JetBrains | **Reformat Code** |
+| Neovim | `vim.lsp.buf.format()` |
+| Helix | `:format` |
+| Sublime Text | **LSP: Format File** |
 
 ## Checking against OpenAPI
 
-Use cases document what services say to each other; OpenAPI specs document
-what the services actually accept. `proschi check` can compare the two so the
-diagrams don't drift from the APIs. Map node ids to spec files (OpenAPI 3.0 or
-3.1, YAML or JSON) in a `proschi.json`:
+`proschi check` compares the steps of your use cases with OpenAPI specs, so
+the diagrams don't drift from the APIs. Map node ids to spec files (OpenAPI
+3.0 or 3.1, YAML or JSON) in a `proschi.json`:
 
 ```json
 {
@@ -269,162 +256,105 @@ diagrams don't drift from the APIs. Map node ids to spec files (OpenAPI 3.0 or
 }
 ```
 
-Paths are relative to `proschi.json`. Each checked file uses the nearest
-`proschi.json` in its directory or above it. On the command line,
-`--openapi <node>=<spec>` (repeatable, relative to the working directory) adds
-a mapping or overrides the one in the config:
+Paths are relative to `proschi.json`, and each file uses the nearest one in
+its folder or above. `--openapi <node>=<spec>` (repeatable, relative to the
+working directory) adds or overrides a mapping:
 
 ```sh
-proschi check --strict --format github docs/
 proschi check --openapi orders=build/openapi.yaml docs/checkout.proschi
 ```
 
-Every step that calls a node with a spec and has an HTTP method is checked:
+Every step with an HTTP method that calls a mapped node is checked:
 
 | Check | Example warning |
 |---|---|
 | The method and path exist | `GET /ordres/42: 'orders-api.yaml' has no path /ordres/42; did you mean GET /orders/{orderId}?` |
-| The status code on the `-->` reply is documented: exactly, as a range (`4XX`) or by `default` | `Status 422 is not documented for POST /orders (documented: 201, 400)` |
-| A JSON request body matches the `application/json` schema | `Request body does not match the schema of POST /orders: /items/0/quantity must be integer` |
-| A JSON response body matches the schema of that status | `200 response body does not match the schema of GET /orders/{orderId}: /status must be equal to one of the allowed values: "pending", "paid", "shipped"` |
+| The `-->` reply's status is documented, exactly, as a range (`4XX`) or by `default` | `Status 422 is not documented for POST /orders (documented: 201, 400)` |
+| A JSON request body matches the schema | `Request body does not match the schema of POST /orders: /items/0/quantity must be integer` |
+| A JSON response body matches the schema of its status | `200 response body does not match the schema of GET /orders/{orderId}: /status must be equal to one of the allowed values: "pending", "paid", "shipped"` |
 
-- Concrete paths match templates: `/orders/42` and `/orders/{id}` both match
-  `/orders/{orderId}`. A parameter stands for exactly one segment; a literal
-  path such as `/orders/latest` wins over a template. Query strings are ignored.
-- If `servers[0].url` has a path (`https://api.example.com/v1`), steps may be
-  written with or without it: `/v1/orders` and `/orders` both work.
-- Schemas are resolved through local `$ref`s (`#/components/…`). OpenAPI 3.0
-  `nullable` is understood; 3.1 schemas are JSON Schema 2020-12. `format` is
+- `/orders/42` and `/orders/{id}` both match `/orders/{orderId}`. A
+  parameter is one segment, a literal path such as `/orders/latest` wins
+  over a template, and query strings are ignored.
+- When `servers[0].url` has a path (`/v1`), steps may include it or not.
+- Schemas resolve local `$ref`s. `nullable` (3.0) is understood, `format` is
   not checked, and external `$ref`s are skipped.
-- Payloads that aren't JSON (`xml`, `text`) or aren't valid JSON (`{"items": [ … ]}`)
-  are skipped silently, so sketched payloads stay allowed.
-- A failed call (`a -x b`) only has its endpoint checked.
+- Payloads that aren't JSON, or aren't valid JSON, are skipped, so sketched
+  payloads stay allowed. A failed call (`-x`) only has its endpoint checked.
 
-The findings are warnings, so `check` still passes unless you add `--strict`.
-A spec that can't be read or isn't OpenAPI 3 is an error on the node that uses
-it, naming the file.
-
-The language server reports the same findings as you type (source
-`proschi-openapi`) when the document is saved below a `proschi.json`. It
-re-reads specs and the config when they change on disk.
+The findings are warnings, so `check` passes unless you add `--strict`. A
+spec that can't be read is an error on the node that uses it. The language
+server reports the same findings as you type, for documents saved below a
+`proschi.json`.
 
 ## Imports
 
-`import "path.proschi"` statements (see [Imports](LANGUAGE.md#imports)) are
-resolved from the file system, relative to the importing file.
+The command line, the language server and the editor plugins resolve
+[imports](IMPORTS.md) from the file system, relative to the importing file
+and inside the [project root](IMPORTS.md#the-project-root). System `from`
+files work the same way.
 
-- **`proschi check`** reports every problem under the file it occurs in, so an
-  error in `infra.proschi` is printed as `infra.proschi:3:1: …` even when only
-  the files importing it were named on the command line. When several checked
-  files import the same file, its problems are reported once.
-- **`proschi parse`** prints the merged diagram. Locations and diagnostics in
-  imported files carry `file` (relative to the working directory when inside
-  it); `imports` lists every import statement and the file it resolved to.
-- **The language server** prefers the text of open documents over the disk, so
-  unsaved changes count. Each document shows its own problems; an import whose
-  file (or a file that one imports) has errors gets one error on the import
-  line, e.g. `'infra.proschi' has 2 errors`. Editing an open imported file
-  re-validates the open documents that import it. Completion offers node ids
-  from imported files, hover and go to definition work for nodes declared in
-  another file, and the import path is a link to the file. Files that change on
-  disk while closed are picked up the next time the importing document changes.
+`git:` and `https://` imports are read from a local cache that
+`proschi imports sync` fills. It is the only command that uses the network.
+Commit `proschi.lock`, add `.proschi/` to `.gitignore`, and run
+`proschi imports sync --frozen` in CI. See
+[syncing remote imports](IMPORTS.md#syncing-remote-imports).
 
-## Importing from Mermaid and OpenAPI
+- `proschi check` reports each problem under the file it occurs in
+  (`infra.proschi:3:1: …`), even when only the importing file was named.
+- `proschi parse` prints the merged diagram, with `file` on locations from
+  imported files.
+- The language server reads open documents before the disk, so unsaved
+  changes count. An import whose file has errors gets one error on the
+  import line (`'infra.proschi' has 2 errors`). Completion, hover and go to
+  definition work across files.
+- `proschi share-link <file>` prints an editor link that carries the
+  document and every file it imports.
 
-Existing diagrams and API specs can become Proschi documents, as a starting
-point to edit rather than a perfect copy.
+## Converting Mermaid and OpenAPI
 
-**Web editor.** *Diagrams › Import Mermaid or OpenAPI…* opens a dialog with
-a tab per format: paste the text or choose a file, check the Proschi it turns
-into and any warnings, then *Open as new diagram*.
-
-**Command line.**
+A Mermaid diagram or an OpenAPI spec can become a Proschi document, as a
+starting point to edit. In the web editor, use **Diagrams → Import Mermaid
+or OpenAPI…**. On the command line:
 
 ```sh
 proschi import mermaid architecture.mmd > architecture.proschi
 proschi import openapi specs/orders.yaml -o orders.proschi
 ```
 
-The result goes to stdout (or `-o`), warnings to stderr; the exit code is 0
-unless the file cannot be read.
-
-### Mermaid
+The result goes to stdout or `-o`, and what can't be converted goes to
+stderr as warnings.
 
 | Mermaid | Proschi |
 |---|---|
-| `flowchart` / `graph` (any direction) | the architecture |
-| `A[Label]`, `A(Label)` and other shapes | a node; the tech comes from the label (`Orders DB (Postgres)` → `[PostgreSQL]`, `Billing Store` → `[Database]`, `Customer` → `[Actor]`), else from the shape |
-| `[(cylinder)]`, `[[subroutine]]`, `@{ shape: docs }`, `((circle))`, `>flag]` | `[Database]`, `[Message Queue]`, `[Object Storage]`, `[Actor]`, `[Text Note]` when the label names nothing else |
-| `subgraph id [Title] … end` | `group id "Title" { … }` (nested too) |
-| `-->`, `---`, `-.->`, `==>`, `--o`, `--x`, `<-->`, `A & B --> C` | connections (`<-->` gives one each way); `~~~` only places nodes |
-| `-->\|label\|`, `-- label -->` | the connection label |
-| `sequenceDiagram` | a use case, named by its `title` |
-| `participant` / `actor` (and `box … end`) | nodes (`actor` is `[Actor]`; a box is a group) |
-| `->>`, `->` / `-)` / `-x` | a call `->` / one-way `->>` / failed `-x` |
-| `-->>`, `-->` | the answer to the open call it replies to (one-way when it replies to none) |
-| `alt … else … end`, `opt`, `critical … option` | `alt` branches (`opt` adds an empty *Otherwise* branch) |
-| `par … and … end` | `par { … }` |
-| `loop`, `rect`, `break` | their steps, once (with a warning for `loop` and `break`) |
+| `flowchart` / `graph` | the architecture; a node's tech comes from its label (`Orders DB (Postgres)` → `[PostgreSQL]`), else its shape |
+| `subgraph id [Title] … end` | `group id "Title" { … }` |
+| `-->`, `---`, `-.->`, `==>`, `<-->` and the rest | connections; `~~~` only places nodes |
+| `sequenceDiagram` | a use case named by its `title`; `participant` and `actor` become nodes |
+| `->>` or `->`, `-)`, `-x` | a call `->`, a one-way send `->>`, a failed call `-x` |
+| `-->>`, `-->` | the answer to the open call it replies to |
+| `alt … else`, `opt`, `critical … option`, `par … and` | `alt` branches and `par` |
 
-Markdown with several ` ```mermaid ` blocks, such as `proschi render --format
-md` writes, is read as one document: flowcharts give the architecture,
-sequence diagrams the use cases, and the per-scenario diagrams of one use case
-are merged back into its `alt` branches. Calls between nodes that no flowchart
-link joins add the connection. Styling (`style`, `classDef`, `class`,
-`linkStyle`, `click`), notes and other diagram types are left out with a
-warning, and so is a step payload that Mermaid's export cut short. Ids are
-made valid Proschi ids (`api-gw` → `api_gw`, `group` → `group_`).
+Markdown with several `mermaid` blocks, as `proschi render --format md`
+writes it, reads as one document. Styling, notes and other diagram types are
+left out with a warning.
 
-### OpenAPI
-
-An OpenAPI 3.0/3.1 spec (YAML or JSON; Swagger 2.0 paths are read too, with a
-warning) becomes a starter design: a `client` actor, an `api` node named after
-`info.title`, and a use case per operation, named by its `summary` (else its
-`operationId`, else method and path):
-
-```proschi fragment
-usecase "Place an order" {
-  client -> api    : POST /v1/orders
-  api   --> client : 201
-}
-```
-
-The path carries the path of `servers[0].url`, as [`proschi check
---openapi`](#checking-against-openapi) expects, so `proschi check --openapi
-api=spec.yaml` passes on the result. The status is the first 2xx response
-(`2XX` gives 200), else the first documented code. With more than 20
-operations, each tag becomes one use case with a scenario per operation (at
-most 20 tags and 32 operations a tag). In the web editor the YAML parser loads
-only when a YAML spec is pasted.
+An OpenAPI 3.0 or 3.1 spec becomes a starter design: a `client` actor, an
+`api` node named after `info.title`, and a use case per operation, with its
+first 2xx status. `proschi check --openapi api=spec.yaml` passes on the
+result. With more than 20 operations, each tag becomes one use case with a
+scenario per operation.
 
 ## Rendering and export
 
-Diagrams can leave the editor as images, Mermaid source or a static page.
+In the web editor, the **Export** menu next to **Share** has PNG and SVG
+images of the whole diagram, Mermaid (**Copy Mermaid: architecture**,
+**Copy Mermaid: this scenario**, **Download Mermaid (.mmd)**), the
+`.proschi` file, and **Export all (.zip)**, a backup of every diagram in
+this browser. The Mermaid flowchart keeps the diagram's
+[colors](STYLING.md#colors-and-legend) but has no legend.
 
-**Web editor.** Everything that leaves the editor is in the *Export* menu, next
-to *Share* in the header (on narrow screens, the download icon):
-
-- *PNG image* and *SVG image*: the whole diagram, not just the part on screen.
-  From the *Results* or *HLD* tab (or the *Code* pane on a phone) the editor
-  switches back to the diagram to draw it.
-- *Copy Mermaid: architecture*: a `flowchart LR` with a `subgraph` per group
-- *Copy Mermaid: this scenario*: a `sequenceDiagram` of the use case and
-  scenario picked in the editor (disabled when the document has no use case)
-- *Download Mermaid (.mmd)*: the architecture flowchart as a file
-- *Download .proschi file*: the current document
-- *Export all (.zip)*: every diagram saved in this browser and your practice
-  progress, as a backup; *Import backup…* in the Diagrams menu reads it back
-
-Paste the Mermaid source into a Markdown file on GitHub or GitLab inside a
-` ```mermaid ` block and it renders there.
-
-The architecture flowchart keeps the diagram's [colors](LANGUAGE.md#colors-and-legend)
-in their light-theme values: a `classDef` per node style, `style` for a
-colored group, and `linkStyle` for a tagged connection, with its dash.
-Mermaid has no legend, so the `legend` block is left out.
-
-**Command line.** `proschi render` writes static files, for docs sites,
-READMEs and wikis:
+`proschi render` writes static files for docs sites, READMEs and wikis:
 
 ```sh
 proschi render shop.proschi --out docs/diagrams              # SVG (default)
@@ -434,273 +364,85 @@ proschi render shop.proschi --out site --format html         # site/shop.html
 
 | Format | Output |
 |---|---|
-| `svg` | `architecture.svg` and one `<usecase>--<scenario>.svg` sequence diagram per scenario, e.g. `create-order--database-down.svg` |
-| `md` | `<file>.md`: the title, a Mermaid architecture block, and a heading and Mermaid sequence block per use case and scenario |
-| `html` | `<file>.html`: one self-contained page with every SVG and a scenario list |
-| `hld-md` | `<file>.hld.md`: the [high-level design document](#hld-documents) with Mermaid diagrams |
-| `hld-html` | `<file>.hld.html`: the same document as one self-contained page with every SVG |
+| `svg` | `architecture.svg` and a `<usecase>--<scenario>.svg` sequence diagram per scenario |
+| `md` | `<file>.md`: a Mermaid architecture block and a Mermaid sequence block per scenario |
+| `html` | `<file>.html`: one self-contained page with every SVG |
+| `hld-md` | `<file>.hld.md`: the [HLD document](#hld-documents) with Mermaid diagrams |
+| `hld-html` | `<file>.hld.html`: the same document as one page with every SVG |
 
-`--out` defaults to the current directory. The architecture SVG looks like
-the editor's canvas: the same top-down layout (pinned `pos x,y` positions
-included), the same cards with their coloured icon tiles and icons, dashed
-groups and sticky notes. Sequence diagrams use the same icons and colours,
-number the requests, draw error responses and failed (`-x`) calls in red, and
-show `par` blocks as regions. The SVGs need no fonts, images or stylesheets
-and have a white background, so they read well in dark viewers too.
+`--out` defaults to the current folder. The SVGs use the editor's layout and
+cards, need no fonts or stylesheets, and have a white background. A document
+with errors in any of its files is not rendered: `render` prints them and
+exits with 1.
 
-Imports are followed as for `check`, and the merged diagram is rendered. A
-document with errors (in any of its files) is not rendered: `render` prints
-them and exits with 1. Warnings are fine.
+[Team systems](SYSTEMS.md) are drawn as one box each. `--expand orders,feed`
+opens systems in place (`orders.billing` opens its parent too), and
+`--focus orders` draws one system's design alone. An id that names no system
+exits with 2.
 
-**VS Code.** *Proschi: Open Preview to the Side* (the preview button in the
-editor title bar, or the command palette) opens a panel with the architecture
-and a scenario picker showing that scenario's sequence diagram. It updates as
-you type and follows the active `.proschi` editor; while the document has
-errors it lists them above the last good rendering.
+![Rendered with --expand orders: the Order Processing box opened in place, showing its gateway, Orders API, Orders DB at 115% load in red, and stock cache, between Frontend and Warehouse](images/diagrams/org-expanded.svg "proschi render org.proschi --expand orders: the team's own design, inside its box.")
 
 ## Simulation and tests
 
-A document with `traffic { … }` gets a capacity model, and its
-`requirements { … }` and `test "…" { … }` blocks become checks that run
-everywhere: in the web editor, on the command line and in the language
-server. The model is deterministic and analytical, so it runs in milliseconds
-on every change. The syntax is in the [language reference](LANGUAGE.md); the
-formulas are in [How the simulation works](https://proschi.app/docs/model/).
-
-### The model
-
-- **Profiles.** Every node gets per-replica numbers from its tech stack (else
-  its component type): read and write capacity in requests per second, base
-  latency, availability, monthly cost, whether it keeps data, network
-  bandwidth, an egress price and, for data stores, a consistency.
-  `capacity { … }` overrides them per node. Clients (actors and plain shapes)
-  have unlimited capacity and add nothing. The defaults are teaching values,
-  right to an order of magnitude:
-
-  | Kind | Reads / writes per replica | Latency | Availability | Cost / month | Durable | Consistency |
-  |---|---|---|---|---|---|---|
-  | cdn (CloudFront, Azure CDN, Cloud CDN, Front Door) | 200k | 5 ms | 99.99% | $100 | no | — |
-  | loadbalancer (AWS Load Balancer, GCP Load Balancing) | 100k | 2 ms | 99.99% | $50 | no | — |
-  | gateway (AWS API Gateway, Azure API Management) | 10k | 10 ms | 99.95% | $100 | no | — |
-  | dns (Route53, Azure DNS, Cloud DNS): off the request path | ∞ | 0 | 100% | $0 | no | — |
-  | service (REST, gRPC, containers, VMs) | 2k | 10 ms | 99.5% | $100 | no | — |
-  | function (Lambda, Cloud Run, …) | 10k | 25 ms | 99.95% | $200 | no | — |
-  | cache (Redis, Memcached, …) | 100k | 1 ms | 99.9% | $150 | no | eventual |
-  | database, relational (PostgreSQL, MySQL, Aurora, RDS, SQL Server, …) | 20k reads / 5k writes per shard | 5 ms | 99.95% | $400 | yes | strong |
-  | database, partitioned (DynamoDB, Cassandra, Cosmos DB, CouchDB) | 20k | 5 ms | 99.99% | $500 | yes | eventual |
-  | database, partitioned (MongoDB, Bigtable, Firestore, Spanner) | 20k | 5 ms | 99.99% | $500 | yes | strong |
-  | search (Elasticsearch) | 3k | 15 ms | 99.9% | $400 | yes | eventual |
-  | analytics (BigQuery, InfluxDB, TimescaleDB) | 200 | 500 ms | 99.9% | $300 | yes | eventual |
-  | queue and broker (SQS, Kafka, Pub/Sub, …) | 50k | 5 ms | 99.99% | $200 | yes | strong |
-  | storage (S3, Blob Storage, …) | 5k | 30 ms | 99.99% | $50 | yes | eventual |
-  | external (payment, email, third-party APIs) | 1k | 200 ms | 99.9% | $0 | no | — |
-
-  `any edge` selects all four edge kinds (and an edge tech that is none of
-  them). Bandwidth per replica: clients 10 MB/s, edge kinds 1 000 MB/s,
-  services 200 MB/s, everything else 100 MB/s. Egress: storage $0.09/GB, CDNs
-  $0.02/GB, everything else free.
-- **Reads and writes.** Every request step is a read or a write: a write for
-  POST, PUT, PATCH and DELETE or a label starting with a write verb (INSERT,
-  UPDATE, PUT, SET, INCR, ZADD, PUBLISH, SEND, STORE, HOLD, …; the full list is
-  in [Reads and writes](LANGUAGE.md#reads-and-writes)), a read otherwise. A request to a queue is always a write, whatever its label: the
-  queue stores the message.
-- **Load.** Each use case's rate is split over its scenarios by `mix` (all to
-  the first scenario without one); every request step (`->`, `->>`, `-x`) adds
-  its share to the target's reads or writes, times its fan-out (`x200 …` counts
-  200 calls).
-- **Capacity and utilisation.** Replicas and `shards` multiply capacity.
-  Relational databases are single-primary: replicas add reads, but every write
-  goes to one primary per shard, so write capacity grows only with
-  `shards` (`capacity { db shards 4 }`); utilisation is the busier of reads
-  and writes. Everything else serves reads and writes on the same replicas, so
-  their shares add up (load over capacity when both are equal). A node with
-  `shards` has replicas × shards instances and costs that many. At 100% a node
-  is **saturated** and every latency requirement whose use case sends it load
-  fails; the hint names shards when writes on a single-primary store are the
-  problem.
-- **Latency.** A hop costs its base latency ÷ (1 − utilisation), capped at 95%
-  utilisation, plus the payload's transfer time: a `~2MB` label adds size ÷
-  the slower bandwidth of its two ends (2 MB to a client at 10 MB/s is 200 ms).
-  A fan-out step counts once. A scenario's mean is the sum over the
-  synchronous path of its entry request: a `par` block counts its slowest call,
-  an async send (`->>`) only the send, a failed call (`-x`) a 1 s timeout, and
-  nothing after the entry request is answered. Percentiles are the mean × 1.0
-  (p50), 1.6 (p90), 2.0 (p95), 3.0 (p99), 5.0 (p99.9). A use case's percentile
-  is the slowest scenario that carries at least the tail share: with 10% cache
-  misses, p99 is the miss path; with 0.5%, it is the hit path.
-  `p99 "U" scenario "S" < 100ms` measures one scenario, whatever its share.
-- **Availability.** A node with n replicas is up 1 − (1 − a)ⁿ of the time. A use
-  case multiplies the nodes on the synchronous path of its main scenario; a
-  node with a fallback counts as up when either it or the fallback's extra
-  nodes are. A fallback is a success scenario that calls the node with `-x`
-  before answering the entry request and makes no successful synchronous call
-  to it before then; a retry after the response does not cancel it. (When the
-  use case answers at once and a worker does the rest, the worker's whole run
-  is the window.)
-- **Failure injection.** `survive any node failure` (or `survive failure of
-  <selector>`) removes one instance of each node: with two or more replicas the
-  rest must carry the load (losing a relational replica costs reads, not
-  writes); a single instance needs a fallback scenario in every use case that
-  uses it. Clients, DNS and external systems are only checked when selected
-  explicitly.
-- **Durability.** `durable "U"` and `writes X before responding` need every
-  success scenario to send a **write** synchronously, before the entry request
-  is answered (to a durable node for `durable`). A SELECT is not a write.
-- **Cost.** The sum of instances × cost, plus egress: data leaving storage or
-  a CDN costs rps × share × fan-out × size × 2 592 000 s/month × price
-  (1 GB = 10⁹ bytes). A read's payload leaves its target (the answer); a
-  write's leaves its sender. `capacity { blobs egress 0.05 usd/GB }` changes
-  the price, `bandwidth 500 MB/s` the bandwidth.
-- **Consistency.** `any strong store` and `any eventual store` select data
-  stores by consistency (`capacity { cache consistency strong }` overrides it),
-  so a test can require `"Hold seat" writes any strong store before
-  responding` and `"Hold seat" never calls any eventual store`.
-
-Test blocks also check `U never waits for X` (no synchronous call to X before
-the response; async sends and work after it are fine), `U calls Y after X`
-(the last call to Y follows the first call to X), `[in U] X calls Y` and
-`X never calls Y` (steps sent by X), `U starts at X` (who sends the entry
-request) and selector unions (`any cache or any database`).
-
-Every requirement line and every `test` block yields one result. Messages say
-what was measured and the limit (`p99 of Redirect is 71.9 ms (limit 100 ms)`)
-and name the offending step with its line (`api -> gateway : CHARGE card at
-line 12 is synchronous`); a missing use case or scenario is reported once per
-test. Failures come with a hint naming the lever: add replicas or shards, add
-a cache, add a fallback scenario, move work async, serve downloads from a
-CDN.
-
-### Web editor
-
-Above the diagram, three tabs: **Diagram**, **Results** and **HLD**. The
-Results tab's badge counts the passing checks, and the tab itself reads from
-the top down:
-
-1. **Requirements and tests.** Failing ones first, each with its message and
-   the hint naming the lever; the passing ones are folded under *N passing*.
-   Click one to jump to its line.
-2. **The analysis.** Per-node utilisation bars (amber above 70%, red when
-   saturated; separate read and write load, capacity and utilisation for
-   stores where they differ), latency percentiles per use case with a
-   breakdown per scenario, availability, cost per node with its egress, the
-   total cost (and how much of it is egress), single points of failure and
-   warnings. Without `traffic`, it explains how to add it.
-3. **Review.** *Review my design* writes a review of the trade-offs from the
-   simulation and the test results.
-
-Everything recomputes as you type. Links that open the editor with
-`?view=results` (or the older `?view=analysis` and `?view=tests`) start on
-this tab; `?view=hld` starts on the HLD.
-
-### Command line
+A document with `traffic` gets a capacity model, and its `requirements` and
+`test` blocks become checks that run in the web editor, on the command line
+and in the language server. [How the simulation works](https://proschi.app/docs/model/)
+has the model and its default numbers; [requirements and tests](TESTS.md)
+has the syntax.
 
 ```sh
-proschi test docs/                           # every *.proschi below docs/
-proschi test --format github shortener.proschi
-proschi analyze shortener.proschi            # the capacity table
+proschi test docs/                 # every *.proschi below docs/
+proschi analyze shortener.proschi  # the capacity table
 ```
 
-`proschi test` follows imports like `check`, prints each result (with the
-hint for failures) and exits with 1 when a requirement or test fails or a
-file has errors, 0 otherwise; files without requirements or tests pass.
-`--format github` writes an error annotation per failure at its line;
-`--format json` prints every result (`id`, `name`, `category`, `passed`,
-`message`, `hint`, `loc`).
+`proschi test` follows imports, prints each result with a hint for failures,
+and exits with 1 when one fails. Files without requirements or tests pass.
+`--format json` prints `id`, `name`, `category`, `passed`, `message`, `hint`
+and `loc` per result.
 
-`proschi analyze` prints, per node, reads and writes separately (load of
-capacity and utilisation, e.g. `3k/15k rps 20%`; shards next to the
-replicas), the combined utilisation, latency, availability, egress (cost and
-volume per month) and cost; then the total cost with its egress part, latency
-percentiles per use case and scenario, single points of failure and warnings.
-The HLD's *Capacity estimates* table shows the same read/write split and
-egress. `--format json` prints the
-whole analysis (unlimited capacities come out as `null`).
+`proschi analyze` prints, per node, reads and writes against capacity
+(`3k/15k rps 20%`), utilisation, latency, availability, egress and cost,
+then the total cost, latency percentiles per use case and scenario, and
+single points of failure. `--format json` prints the whole analysis.
 
-In CI, the [GitHub Action](#github-action) runs `check` and `test` and
-comments the results on pull requests.
-
-### Language server
-
-Failing requirements and tests are warnings on their lines (source
-`proschi-test`); for a `test` block, also on each failing assertion. When the
-document has traffic, hovering a node adds its load, utilisation, latency,
-availability and cost.
+In the web editor, the **Results** tab lists failing checks first, each with
+its hint, then the analysis and **Review my design**. Links with
+`?view=results` open on that tab, and `?view=hld` on the HLD. In the
+language server, failing requirements and tests are warnings on their
+lines, and hovering a node shows its load and cost.
 
 ## HLD documents
 
-Proschi turns a document into a high-level design (HLD): the structured write-up
-a design review expects, generated from the same text as the diagram. Sections
-without content are left out:
+Proschi turns a document into a high-level design (HLD) write-up, the
+structure a design review expects. Sections without content are left out:
 
 | Section | From |
 |---|---|
 | Overview | `title "Name" "Summary"`, the architecture diagram, counts of components, use cases and teams |
-| Requirements | Functional: every use case with its description and scenarios (with `when` conditions). Non-functional: each line of `requirements { … }` and each `test` block, with pass/fail and the measured value |
-| Capacity estimates | The `traffic { … }` table; load, capacity, utilisation, replicas and cost per component; the total cost |
-| Components | Name, tech, kind (service, database, cache, queue, …), team, replicas (`x3`), responsibility (the node description), entities stored |
-| Data model | `entity` blocks: fields, types, flags and the store they live in |
-| APIs | Use cases grouped by endpoint (`GET /orders/42` and `GET /orders/{id}` share one): request body and the entry response of every scenario |
-| Scenarios | Per use case and scenario: condition, share of traffic, latency, and the sequence of messages |
-| Decisions | `decision` blocks: the choice, why, and the rejected options with reasons |
-| Risks | Failing requirements and tests, saturated and hot (over 70% busy) components, single points of failure, use cases without an error scenario |
+| Requirements | every use case and its scenarios, then each requirement and test with pass or fail and the measured value |
+| Capacity estimates | the `traffic` table, and load, utilisation, replicas and cost per component |
+| Components | name, tech, kind, team, replicas, responsibility (the node description), entities stored |
+| Data model | `entity` blocks |
+| APIs | use cases grouped by endpoint, with request bodies and responses |
+| Scenarios | condition, share of traffic, latency and messages per scenario |
+| Decisions | `decision` blocks: the choice, why, and the rejected options |
+| Risks | failing checks, components over 70% busy, single points of failure, use cases without an error scenario |
 
-The checks (pass/fail, load, latency, cost, single points of failure) come
-from the [simulation](#simulation-and-tests); a document without traffic,
-requirements or tests simply has no such rows.
-
-**Web editor.** The *HLD* tab above the diagram (next to *Diagram* and
-*Results*) shows the document; *Markdown* and *HTML* download it. A line on
-top sums up the checks and links to *Results*, where each one has its detail;
-the document keeps its own requirements tables, since they are part of what
-you download. The browser HTML lists each scenario's messages instead of
-drawing sequence diagrams.
-
-**Command line.**
+In the web editor, the **HLD** tab shows it, with **Markdown** and **HTML**
+downloads. On the command line:
 
 ```sh
 proschi render shop.proschi --out docs --format hld-md     # docs/shop.hld.md
 proschi render shop.proschi --out site --format hld-html   # site/shop.hld.html
 ```
 
-The Markdown uses Mermaid blocks, which GitHub and GitLab render; the HTML
-embeds the same architecture and sequence SVGs as `--format html`, with no
-scripts or external files.
+The Markdown uses Mermaid blocks, which GitHub and GitLab render. The HTML
+has no scripts or external files. The blocks behind it are in
+[high-level design](HLD.md).
 
-## Practice
+## Practice problems
 
-The practice page (`practice/` next to the editor, linked from its header and
-the landing page) is a set of system design problems in the style of LeetCode.
-A problem gives use cases, traffic and requirements; you design the system in
-Proschi and *Run tests* checks it, in the browser, against every requirement
-and flow test, with what was measured and how to fix what fails.
-
-- The editor starts from the problem's starter code, which begins with
-  `import "problem.proschi"`. That file is the problem's given part (traffic,
-  requirements, tests and fixed nodes such as the client); it is read-only and
-  shown under the statement.
-- The diagram, playback and *Analysis* work as in the editor; test blocks
-  list the result of each assertion line. Hints open one at a time;
-  the reference solution is shown after solving, or before with a confirmation.
-- Progress (to do, attempted, solved) and your last code per problem are kept
-  in this browser. When the site has the optional API (backend/README.md),
-  signing in with GitHub or Google also keeps them on the server, across
-  devices: the server re-runs the tests before it records a solve, and shows
-  how many solved each problem, how your design's cost and p99 compare with
-  other solvers', and a leaderboard of those who opt in.
-
-- In practice, `capacity` comes from the problem only: a `capacity` line in
-  your file is an error (*capacity is set by the problem; change the design
-  (replicas, shards, caching) instead*) and is ignored, except `shards <n>`.
-
-For contributors writing practice problems: each problem is a folder of
-plain files (the statement, the given design, the reference solution and the
-wrong designs) in the Proschi repository. Two commands help write them:
-
-```sh
-proschi problem new seat-map                  # scaffold a folder that already passes the check
-proschi problem check                         # validate every problem (exit 1 on a violation)
-proschi problem check --format github frontend/src/practice/problems   # in CI
-```
-
-The format, the rules `problem check` enforces and how to calibrate a
-problem: [PRACTICE.md](PRACTICE.md).
+The [practice page](https://proschi.app/practice/) has system design
+problems with tests that run in the browser. To write one, see
+[writing practice problems](PRACTICE.md): `proschi problem new <id>`
+scaffolds a folder and `proschi problem check` validates them.

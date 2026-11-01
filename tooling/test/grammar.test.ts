@@ -275,6 +275,44 @@ describe('TextMate grammar', () => {
     expect(scopeOf([plain], 'x200')).not.toBe('constant.numeric.label-prefix.proschi');
   });
 
+  it('scopes system blocks: from, expose and the capacity stub', () => {
+    const lines = tokenize(
+      [
+        'system orders "Order Processing" @Orders {',
+        '  from "teams/orders.proschi"',
+        '  expose api "Orders API" -> "Place order"',
+        '  capacity { 2k rps p99 150ms availability 99.95% }',
+        '  capacity {',
+        '    500 rps',
+        '  }',
+        '}',
+        'web -> orders.api : place order',
+        'from "x"',
+      ].join('\n'),
+    );
+    expect(lines[0].slice(0, 2)).toEqual([
+      ['system', 'keyword.control.proschi'],
+      ['orders', 'variable.other.node.proschi'],
+    ]);
+    expect(scopeOf(lines, '@Orders')).toBe('entity.other.attribute-name.team.proschi');
+    expect(lines[1].slice(0, 2)).toEqual([
+      ['from', 'keyword.control.import.proschi'],
+      ['"', 'punctuation.definition.string.begin.proschi'],
+    ]);
+    expect(scopeOf(lines, 'teams/orders.proschi')).toBe('string.quoted.double.path.proschi');
+    expect(lines[2].slice(0, 2)).toEqual([
+      ['expose', 'keyword.control.proschi'],
+      ['api', 'variable.other.node.proschi'],
+    ]);
+    expect(scopeOf(lines, '->')).toBe('keyword.operator.arrow.proschi');
+    expect(lines[3][0]).toEqual(['capacity', 'keyword.control.proschi']);
+    expect(scopeOf([lines[3]], 'p99')).toBe('keyword.other.proschi');
+    expect(scopeOf([lines[3]], '150ms')).toBe('constant.numeric.proschi');
+    expect(lines[7]).toEqual([['}', 'punctuation.section.block.end.proschi']]);
+    // Outside a system block, from is an ordinary node id.
+    expect(lines[9][0]).toEqual(['from', 'variable.other.node.proschi']);
+  });
+
   it.each(examples.map((e) => [e.id, e.source]))('tokenizes the %s example without leaving a block open', (_id, source) => {
     let state = vsctm.INITIAL;
     for (const line of source.split('\n')) state = grammar.tokenizeLine(line, state).ruleStack;

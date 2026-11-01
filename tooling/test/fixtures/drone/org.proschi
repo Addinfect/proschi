@@ -1,0 +1,36 @@
+title "Drone startup"
+shopper [Browser]
+system frontend "Frontend" @Frontend {
+  from "teams/frontend.proschi"
+  expose web -> "Open shop"
+}
+system orders "Order Processing" @Orders {
+  from "teams/orders.proschi"
+  expose api "Orders API" -> "Place order"
+}
+system warehouse "Warehouse" @Warehouse {
+  from "teams/warehouse.proschi"
+  expose stock -> "Reserve stock"
+}
+system feed "Feed" @Feed {
+  from "teams/feed.proschi"
+  expose events -> "Publish event"
+}
+shopper -> frontend.web
+frontend -> orders.api
+orders -> warehouse.stock
+orders -> feed.events
+usecase "Buy drone" {
+  shopper -> frontend.web : open shop
+  frontend -> orders.api : place order
+  orders -> warehouse.stock : reserve
+  orders ->> feed.events : order placed
+  orders --> frontend : 201
+  frontend --> shopper : 200
+}
+traffic {
+  "Buy drone" 100 rps
+}
+requirements {
+  p99 "Buy drone" < 800ms
+}

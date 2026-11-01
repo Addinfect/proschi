@@ -1,9 +1,8 @@
 # Your first diagram in 2 minutes
 
-Type a few lines, get a laid-out architecture diagram, then press Play and
-watch a request travel through it. No account, no install: every example
-below is live, and *Open in editor* takes it to the [editor](https://proschi.app/app/)
-with the code in the link.
+You will end with a diagram, a request you can play, a failure path and a
+requirement that checks itself. Every example is live: **Open in editor**
+takes it to the [editor](https://proschi.app/app/).
 
 ## 1. Two boxes and an arrow
 
@@ -17,14 +16,17 @@ db  "Orders DB" [PostgreSQL]
 api -> db : SQL
 ```
 
-That is a diagram already. The tech stack picks the icon, and later the
-numbers the simulation uses: `[PostgreSQL]` is a database, `[Redis]` a cache,
-`[Kafka]` a message broker. About 210 of them are known, with the names people
-usually write (`[Postgres]`, `[S3]`, `[k8s]`).
+The tech stack picks the icon and the numbers the simulation uses later:
+`[PostgreSQL]` is a database, `[Redis]` a cache, `[Kafka]` a message broker.
+About 210 are known, under the names people usually write (`[Postgres]`,
+`[S3]`, `[k8s]`). [Nodes, groups and connections](NODES.md) has the rest.
+
+> **Try it:** open it in the editor and add `cache "Cache" [Redis]` and
+> `api -> cache : GET`. A third box appears and the layout makes room for it.
 
 ## 2. A request that flows
 
-A **use case** is a request flow, step by step: `->` is a request, `-->` its
+A **use case** is a request, step by step: `->` is a call and `-->` its
 response. Press **Play**.
 
 ```proschi
@@ -42,11 +44,17 @@ usecase "Place order" {
 }
 ```
 
+Each step names its endpoint, payload or status, and follows a connection
+you drew (the editor warns when one is missing). [Use cases](USE-CASES.md) covers fan-out, async calls
+and payloads.
+
+> **Try it:** press **Play** and watch the request reach the database and
+> come back with `201`.
+
 ## 3. Break it on purpose
 
-Real systems fail. `alt` splits a use case into **scenarios** that share
-their first steps, and `-x` is a call that never gets an answer. Pick
-*Place order › DB down* and play it: the request dies at the database, in red.
+`alt` splits a use case into **scenarios** that share their first steps,
+and `-x` is a call that never gets an answer.
 
 ```proschi
 user "Shopper"   [Browser]
@@ -67,6 +75,9 @@ usecase "Place order" {
   }
 }
 ```
+
+> **Try it:** pick **Place order › DB down** and press **Play**. The request
+> dies at the database, in red.
 
 ## 4. Ask whether it holds up
 
@@ -98,17 +109,20 @@ requirements {
 }
 ```
 
-Open it in the editor and change `x2` to `x1` on the database: *survive any
-node failure* turns red, because one database is a single point of failure.
+`x2` runs two replicas, and both requirements pass.
 [How the simulation works](https://proschi.app/docs/model/) explains every
 number.
 
-## Where next
+![The editor with this example on the left and the Results tab open on the right: All 2 passing, a total cost of $1,000/month, no saturated nodes, and a table of each node's load, utilisation, latency and availability](images/screens/results.png "The Results tab, next to Diagram and HLD above the canvas.")
 
-- **Learn the language**: groups, async calls,
-  [parallel steps](LANGUAGE.md#parallel-steps), payloads, imports and the
-  high-level design blocks are in the [language reference](LANGUAGE.md).
-- **Practise**: [system design problems](https://proschi.app/practice/) whose
-  tests tell you in the browser whether your design holds up.
-- **Use your own editor**: VS Code, IntelliJ, Neovim and CI support is in
-  [Editor support](EDITORS.md).
+> **Try it:** open it in the editor and change `x2` to `x1` on `db`.
+> *survive any node failure* turns red, because one database is a single
+> point of failure.
+
+## Go further
+
+- [Scenarios](SCENARIOS.md): failure paths, [parallel steps](SCENARIOS.md#parallel-steps)
+  and endpoint groups.
+- [Requirements and tests](TESTS.md): every limit you can check.
+- The [language reference](LANGUAGE.md): every statement.
+- [Editor support](EDITORS.md): VS Code, IntelliJ, Neovim and CI.

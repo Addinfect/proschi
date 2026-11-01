@@ -1,0 +1,33 @@
+# render: --expand orders
+title "Drone startup"
+
+shopper "Customer" [Browser]
+
+system frontend "Frontend" @Frontend {
+  expose web "Shop"
+  capacity { 20k rps p99 300ms availability 99.95% }
+}
+system orders "Order Processing" @Orders {
+  from "teams/orders.proschi"
+  expose api "Orders API" -> "Place order"
+}
+system warehouse "Warehouse" @Warehouse {
+  expose stock "Stock API"
+  capacity { 3k rps p99 200ms availability 99.9% }
+}
+
+shopper  -> frontend.web    : HTTPS
+frontend -> orders.api      : place order
+orders   -> warehouse.stock : reserve
+
+usecase "Buy drone" {
+  shopper  -> frontend.web    : open shop
+  frontend -> orders.api      : place order
+  orders   -> warehouse.stock : reserve
+  orders  --> frontend        : 201
+  frontend --> shopper        : 200
+}
+
+traffic {
+  "Buy drone" 2k rps
+}

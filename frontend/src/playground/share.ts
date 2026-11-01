@@ -1,5 +1,6 @@
 import { compressToEncodedURIComponent } from 'lz-string';
 import { TooLargeError, decompressBounded } from './lzBounded';
+import { isImportKey } from '../dsl/imports';
 import { fileMap } from './sanitize';
 
 const PREFIX = '#code=';
@@ -100,15 +101,21 @@ export function decodeShareLink(hash: string): ShareLink | null {
   return link && 'source' in link ? link : null;
 }
 
-/** Imported files from `&imports=`; throws TooLargeError past `budget` characters. */
+/**
+ * Imported files from `&imports=`; throws TooLargeError past `budget` characters.
+ * Keys that no import could resolve to (absolute paths, malformed remote specs) are dropped.
+ */
 function decodeImports(value: string | undefined, budget: number): Record<string, string> | undefined {
   if (!value) return undefined;
   const json = decompressBounded(value, budget);
+  let files: Record<string, string> | undefined;
   try {
-    return fileMap(JSON.parse(json ?? ''));
+    files = fileMap(JSON.parse(json ?? ''));
   } catch {
     return undefined;
   }
+  const kept = Object.entries(files ?? {}).filter(([path]) => isImportKey(path));
+  return kept.length ? Object.fromEntries(kept) : undefined;
 }
 
 export function decodeShareHash(hash: string): string | null {

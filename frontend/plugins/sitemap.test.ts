@@ -21,6 +21,13 @@ describe('sitemap', () => {
     expect(new Set(urls).size).toBe(urls.length)
   })
 
+  it('lists every docs page in the sidebar', () => {
+    const urls = sitemapUrls(site, [])
+    for (const slug of new Set(site.nav.flatMap((g) => g.items.flatMap((i) => (i.page !== undefined ? [i.page] : []))))) {
+      expect(urls, slug).toContain(`https://proschi.app/docs/${slug ? `${slug}/` : ''}`)
+    }
+  })
+
   it('lists the roadmap guides after the problems', () => {
     const urls = sitemapUrls(site, ['url-shortener'], ['approach'])
     expect(urls.slice(3, 5)).toEqual(['https://proschi.app/practice/url-shortener/', 'https://proschi.app/practice/approach/'])

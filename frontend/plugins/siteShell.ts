@@ -11,7 +11,7 @@ const SHELL = fileURLToPath(new URL('../src/design/shell.tsx', import.meta.url))
 const PLACEHOLDER = /<!--shell:([a-z]+)-->/g;
 const SLOTS = new Set(['header', 'footer']);
 /** The page each top-level folder is, for the header's "you are here". */
-const PAGES: Record<string, string> = { '': 'home', app: 'editor', practice: 'practice', docs: 'docs' };
+const PAGES: Record<string, string> = { '': 'home', app: 'editor', practice: 'practice', docs: 'docs', blog: 'blog' };
 
 /**
  * Static pages (the landing page, model/) carry <!--shell:header--> and

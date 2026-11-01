@@ -14,6 +14,8 @@ import 'reactflow/dist/style.css';
 import { Group, Panel as SplitPanel, Separator, type Layout } from 'react-resizable-panels';
 import {
   AlignLeft,
+  ArrowLeft,
+  ChevronRight,
   AlertCircle,
   AlertTriangle,
   BookOpen,
@@ -53,6 +55,7 @@ import {
   DOCS_KEY,
   addDoc,
   addFile,
+  addFiles,
   currentDoc,
   fileNameOf,
   initialState,
@@ -63,11 +66,12 @@ import {
   selectDoc,
   titleOf,
   updateCurrent,
+  updateDoc,
   type DocumentState,
 } from '../../playground/documents';
 import { createDocStore } from '../../playground/docStore';
 import { groupByEndpoint } from '../../playground/useCaseGroups';
-import { filesResolver, importableFiles, usedImports } from '../../playground/imports';
+import { filesResolver, importableFiles, teamFileOf, usedImports, type TeamFile } from '../../playground/imports';
 import { LONG_LINK_MESSAGE, LONG_LINK_SHORTEN_MESSAGE, decodeShareLink, encodeShareHash, isLongLink, readShareLink, shareUrl, type PlaybackTarget } from '../../playground/share';
 import { applyMerge, backupFileName, buildBackup, mergeSummary, planMerge, readBackup } from '../../playground/backup';
 import { loadProgress, mergeProgress, saveProgress } from '../../practice/progress';
@@ -76,10 +80,13 @@ import type { Diagram } from '../../dsl/types';
 import Palette, { TECH_DRAG_TYPE } from '../Diagram/Palette';
 import Inspector from '../Diagram/Inspector';
 import FlowParticles from '../Overlay/FlowParticles';
-import { analysisOverlay, type SimOverlay } from '../../sim/overlay';
+import type { SimOverlay } from '../../sim/overlay';
 import ComponentNode from '../Canvas/ComponentNode';
 import GroupNode from '../Canvas/GroupNode';
+import SystemNode from '../Canvas/SystemNode';
 import TextNode from '../Canvas/TextNode';
+import { SystemActionsContext, type SystemActions, type SystemNodeData } from '../Canvas/systemActions';
+import { useSystemView, type Crumb } from './useSystemView';
 import PaneLoading from '../PaneLoading';
 import ViewTabs from '../Analysis/ViewTabs';
 import { parseView, type View } from '../Analysis/view';
@@ -133,6 +140,7 @@ const VIEW_LABEL: Record<View, string> = { diagram: 'Diagram', results: 'Results
 const nodeTypes = {
   componentNode: ComponentNode,
   groupNode: GroupNode,
+  systemNode: SystemNode,
   textNode: TextNode,
 };
 
@@ -231,6 +239,7 @@ export default function Playground() {
   /** The screen band a phone tour card covers; the canvas fits the diagram around it. */
   const [tourCover, setTourCover] = useState<CoverBand | null>(null);
   const editorRef = useRef<CodeEditorHandle>(null);
+  const teamEditorRef = useRef<CodeEditorHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const backupInputRef = useRef<HTMLInputElement>(null);
   const zen = useZenMode();
@@ -256,11 +265,20 @@ export default function Playground() {
   );
   const { diagram, diagnostics } = parsed;
   const simulation = useSimulation(diagram);
+  /** What the canvas shows of the document's systems: collapsed, expanded in place, or navigated into. */
+  const systems = useSystemView(current.id, diagram, simulation.analysis, simulation.results);
+  const { shown } = systems;
+  /** Navigated into a system: its team file, which the code pane shows instead of the document. */
+  const team = useMemo(() => (systems.focusFile ? teamFileOf(docState.docs, current, systems.focusFile) : undefined), [systems.focusFile, docState.docs, current]);
+  const teamDiagnostics = useMemo(() => (team ? diagnostics.filter((d) => d.file === team.path) : []), [team, diagnostics]);
+  const editTeam = (next: string) => {
+    if (team?.docId) setDocState((s) => updateDoc(s, team.docId!, next));
+  };
   const imports = useMemo(() => usedImports(parsed, JSON.parse(importableKey), rootPath), [parsed, importableKey, rootPath]);
   const importsKey = JSON.stringify(imports);
   const rootDiagnostics = useMemo(() => diagnostics.filter((d) => d.file === undefined), [diagnostics]);
-  /** Nodes declared in imported files (id → file); canvas edits leave them alone. */
-  const importedNodes = useMemo(() => new Map(diagram.nodes.flatMap((n) => (n.loc.file ? [[n.id, n.loc.file] as const] : []))), [diagram]);
+  /** Nodes declared in imported files or team designs (id → file); canvas edits leave them alone. */
+  const importedNodes = useMemo(() => new Map(shown.nodes.flatMap((n) => (n.loc.file ? [[n.id, n.loc.file] as const] : []))), [shown]);
   const [notice, setNotice] = useState<string | null>(null);
   // A link that could not be opened says so; the banner also carries long-link and backup messages.
   const [banner, setBanner] = useState<BannerMessage | null>(() => {
@@ -281,13 +299,14 @@ export default function Playground() {
     return () => clearTimeout(timer);
   }, [notice]);
   const nodeIds = useMemo(() => diagram.nodes.map((n) => n.id), [diagram]);
-  const useCase = diagram.useCases.find((u) => u.id === selectedUseCaseId) ?? diagram.useCases[0];
+  // Use cases play on what the canvas shows, so navigated into a team design they are that team's.
+  const useCase = shown.useCases.find((u) => u.id === selectedUseCaseId) ?? shown.useCases[0];
   const scenario = useCase?.scenarios.find((s) => s.id === selectedScenarioId) ?? useCase?.scenarios[0];
   const hasScenarios = (useCase?.scenarios.length ?? 0) > 1;
   const playback: PlaybackTarget | undefined =
     playing && useCase ? { useCase: useCase.id, ...(hasScenarios && scenario ? { scenario: scenario.id } : {}), step: playStep + 1 } : undefined;
   const playbackKey = playback ? `${playback.useCase}/${playback.scenario ?? ''}#${playback.step}` : '';
-  const useCaseGroups = useMemo(() => groupByEndpoint(diagram.useCases), [diagram]);
+  const useCaseGroups = useMemo(() => groupByEndpoint(shown.useCases), [shown]);
   // The player restarts when this changes, so each scenario starts at its first step.
   const playedUseCase = useMemo(
     () => (useCase && scenario ? { id: `${useCase.id}/${scenario.id}`, name: useCase.name, steps: scenario.steps, condition: scenario.condition } : undefined),
@@ -344,15 +363,19 @@ export default function Playground() {
   const [nodes, setNodes] = useState<Node[]>([]);
   /** "Overlay: load": the analysis drawn on the diagram, for documents with a traffic block. */
   const [overlayOn, setOverlayOn] = useState(false);
-  const canOverlay = (diagram.traffic?.length ?? 0) > 0;
-  const overlay = useMemo(
-    () => (overlayOn && canOverlay ? analysisOverlay(diagram, simulation.analysis) : undefined),
-    [overlayOn, canOverlay, diagram, simulation.analysis],
-  );
+  const canOverlay = (shown.traffic?.length ?? 0) > 0;
+  const { overlayOf, summaries } = systems;
+  const overlay = useMemo(() => (overlayOn && canOverlay ? overlayOf() : undefined), [overlayOn, canOverlay, overlayOf]);
   const shownNodes = useMemo(
-    () => (overlay ? nodes.map((n) => (overlay.nodes[n.id] ? { ...n, data: { ...n.data, overlay: overlay.nodes[n.id] } } : n)) : nodes),
-    [nodes, overlay],
+    () =>
+      nodes.map((n) => {
+        const load = overlay?.nodes[n.id];
+        const system = summaries.get(n.id);
+        return load || system ? { ...n, data: { ...n.data, ...(load ? { overlay: load } : {}), ...(system ? { system } : {}) } } : n;
+      }),
+    [nodes, overlay, summaries],
   );
+  const systemActions = useMemo<SystemActions>(() => ({ open: systems.open, toggle: systems.toggle }), [systems.open, systems.toggle]);
   const [edges, setEdges] = useState<Edge[]>([]);
 
   // Usage counts: the first look at the simulation's numbers (the Results or
@@ -366,18 +389,24 @@ export default function Playground() {
   useEffect(() => {
     setEdges((previous) => {
       const selected = new Set(previous.filter((e) => e.selected).map((e) => e.id));
-      return withEdgeStyles(diagram, toFlowEdges(diagram)).map((e) => (selected.has(e.id) ? { ...e, selected: true } : e));
+      return withEdgeStyles(shown, toFlowEdges(shown)).map((e) => (selected.has(e.id) ? { ...e, selected: true } : e));
     });
-  }, [diagram]);
+  }, [shown]);
 
-  // Keep what the user had selected across re-layouts.
+  // Keep what the user had selected across re-layouts, and the size React Flow measured: a node
+  // without one is hidden until measured again, and a re-measure can be lost while the layout glides.
   const showLaidOut = useCallback((laidOut: Node[]) => {
     setNodes((previous) => {
-      const selected = new Set(previous.filter((n) => n.selected).map((n) => n.id));
-      return laidOut.map((n) => (selected.has(n.id) ? { ...n, selected: true } : n));
+      const before = new Map(previous.map((n) => [n.id, n]));
+      return laidOut.map((n) => {
+        const p = before.get(n.id);
+        if (!p) return n;
+        const measured = p.type === n.type && p.width && p.height ? { width: p.width, height: p.height } : {};
+        return p.selected || measured.width ? { ...n, ...measured, ...(p.selected ? { selected: true } : {}) } : n;
+      });
     });
   }, []);
-  const layoutSettled = useAutoLayout(diagram, showLaidOut);
+  const layoutSettled = useAutoLayout(shown, showLaidOut);
 
   const stopPlaying = () => {
     setPlaying(false);
@@ -501,7 +530,11 @@ export default function Playground() {
   };
 
   const deleteFromCanvas = (nodeIds: string[], edgeIds: string[]) => {
-    const selectedEdges = diagram.edges.filter((e) => edgeIds.includes(e.id));
+    if (systems.focusFile) {
+      setNotice(`This is the design in ${systems.focusFile}; delete it there.`);
+      return;
+    }
+    const selectedEdges = shown.edges.filter((e) => edgeIds.includes(e.id));
     const importedNode = nodeIds.find((id) => importedNodes.has(id));
     const importedEdge = selectedEdges.find((e) => e.loc.file);
     if (importedNode || importedEdge) {
@@ -565,10 +598,12 @@ export default function Playground() {
 
   /** Adds a catalog component; one dropped on the canvas is pinned where it fell, a clicked one is laid out. */
   const addFromCanvas = (tech: string, position?: { x: number; y: number }) => {
+    if (systems.focusFile) return setNotice(`This is the design in ${systems.focusFile}; add components there.`);
     editSource((src) => addNode(src, { name: tech, tech, position }).source);
   };
 
   const connectNodes = (from: string, to: string) => {
+    if (systems.focusFile || importedNodes.has(from) || importedNodes.has(to)) return setNotice(`Declared in ${systems.focusFile ?? importedNodes.get(from) ?? importedNodes.get(to)}; connect it there.`);
     // The connection may already exist in an imported file.
     if (diagram.edges.some((e) => e.source === from && e.target === to)) return;
     editSource((src) => addConnection(src, from, to));
@@ -576,7 +611,12 @@ export default function Playground() {
 
   /** A problem (or test) in an imported file opens that file, if it is saved in this browser. */
   const selectDiagnostic = (d: SourceLoc) => {
+    if (team && d.file === team.path) {
+      teamEditorRef.current?.goTo(d.line, d.col);
+      return;
+    }
     if (d.file === undefined) {
+      if (team) systems.goTo('');
       editorRef.current?.goTo(d.line, d.col);
       return;
     }
@@ -586,9 +626,13 @@ export default function Playground() {
 
   const selectInEditor = useCallback((line: number, col: number, length: number, focus: boolean) => editorRef.current?.select(line, col, length, focus), []);
   const diagramKey = useMemo(() => `${diagram.nodes.map((n) => `${n.id}:${n.name}`).join('|')}#${diagram.edges.length}`, [diagram]);
-  const openExample = (exampleSource: string) =>
-    // An example picked while the current diagram is still empty takes its place instead of piling up "Untitled".
-    openDoc((s) => (isBlank(currentDoc(s).source) ? removeDoc(addDoc(s, exampleSource), s.currentId) : addDoc(s, exampleSource)));
+  /** Opens a diagram as a new document, with the files it imports (`files`, path → source) saved beside it. */
+  const openExample = (exampleSource: string, files?: Readonly<Record<string, string>>) =>
+    openDoc((s) => {
+      // An example picked while the current diagram is still empty takes its place instead of piling up "Untitled".
+      const next = isBlank(currentDoc(s).source) ? removeDoc(addDoc(s, exampleSource), s.currentId) : addDoc(s, exampleSource);
+      return files ? addFiles(next, files) : next;
+    });
   const openHldExample = () => {
     const example = examples.find((e) => e.id === 'url-shortener');
     if (!example) return;
@@ -800,10 +844,11 @@ export default function Playground() {
               setSelectedScenarioId(undefined);
               setInitialStep(undefined);
             }}
-            disabled={diagram.useCases.length === 0}
-            className={`flex-1 min-w-0 sm:flex-none sm:max-w-[13rem] ${field}`}
+            title={useCase?.name}
+            disabled={shown.useCases.length === 0}
+            className={`flex-1 min-w-0 sm:flex-none sm:max-w-[11rem] truncate ${field}`}
           >
-            {diagram.useCases.length === 0 && <option value="">No use cases</option>}
+            {shown.useCases.length === 0 && <option value="">No use cases</option>}
             {useCaseGroups.map((group) =>
               group.label ? (
                 <optgroup key={group.label} label={group.label}>
@@ -971,9 +1016,24 @@ export default function Playground() {
             data-tour="code"
             className="flex flex-1 min-h-0 min-w-0 flex-col"
           >
-            <div className="flex-1 min-h-0">
+            {team && <TeamFileBar team={team} up={systems.crumbs[systems.crumbs.length - 2]} onBack={systems.goTo} />}
+            {/* Hidden, not unmounted, while a team file is shown, so the document keeps its cursor and undo history. */}
+            <div className="flex-1 min-h-0" hidden={!!team}>
               <CodeEditor ref={editorRef} value={source} onChange={typeSource} diagnostics={rootDiagnostics} nodeIds={nodeIds} />
             </div>
+            {team && (
+              <div className="flex-1 min-h-0">
+                <CodeEditor
+                  key={team.path}
+                  ref={teamEditorRef}
+                  value={team.source}
+                  onChange={editTeam}
+                  readOnly={!!team.readOnly}
+                  diagnostics={teamDiagnostics}
+                  nodeIds={shown.nodes.map((n) => n.id)}
+                />
+              </div>
+            )}
             <DiagnosticsPanel diagnostics={diagnostics} onSelect={selectDiagnostic} />
           </EditorZone>
         </SplitPanel>
@@ -1021,6 +1081,7 @@ export default function Playground() {
                   >
                     {(pv) => (
                       <ReactFlowProvider>
+                        <SystemActionsContext.Provider value={systemActions}>
                         <DiagramView
                           nodes={pv.nodes}
                           playback={pv}
@@ -1030,15 +1091,21 @@ export default function Playground() {
                           edges={pv.edges}
                           onNodesChange={setNodes}
                           onEdgesChange={setEdges}
-                          title={diagram.title}
-                          hasPinnedNodes={diagram.nodes.some((n) => n.position)}
+                          title={shown.title}
+                          hasPinnedNodes={!systems.focusFile && shown.nodes.some((n) => n.position)}
                           importedNodes={importedNodes}
                           onMoveNodes={moveNodes}
                           onConnectNodes={connectNodes}
                           onRenameNode={renameFromCanvas}
                           onAddNode={addFromCanvas}
                           onEdit={editSource}
-                          diagram={diagram}
+                          diagram={shown}
+                          crumbs={systems.crumbs}
+                          focusFile={systems.focusFile}
+                          focusReadOnly={!team || !!team.readOnly}
+                          focusInbound={systems.focusInbound}
+                          onCrumb={systems.goTo}
+                          onOpenSystem={(id) => (summaries.get(id)?.linked ? systems.open(id) : setNotice(`'${id}' is declared without a design; add from "file" to its block to open it.`))}
                           onResetLayout={() => editSource(clearPositions)}
                           onDelete={deleteFromCanvas}
                           fitKey={`${mobilePane}:${layoutSettled}`}
@@ -1049,6 +1116,7 @@ export default function Playground() {
                           onNotice={setNotice}
                           cover={tour === 'tour' ? tourCover : null}
                         />
+                        </SystemActionsContext.Provider>
                       </ReactFlowProvider>
                     )}
                   </UseCasePlayback>
@@ -1077,8 +1145,8 @@ export default function Playground() {
         <Suspense fallback={<PaneLoading overlay />}>
           <ExamplesGallery
             onClose={() => setShowExamples(false)}
-            onPick={(picked) => {
-              openExample(picked);
+            onPick={(picked, files) => {
+              openExample(picked, files);
               setShowExamples(false);
             }}
           />
@@ -1249,6 +1317,17 @@ interface DiagramViewProps {
   cover?: CoverBand | null;
   /** The use case playing over the diagram, if any; the canvas is read-only meanwhile. */
   playback: PlaybackView;
+  /** Where the canvas is among the document's systems, top first; one crumb at the top. */
+  crumbs: Crumb[];
+  /** The team file shown when navigated into a system; the canvas cannot edit it. */
+  focusFile?: string;
+  /** The team file cannot be edited in the code pane (it came with a link, or from a remote source). */
+  focusReadOnly?: boolean;
+  /** What the rest of the document sends into the design navigated into. */
+  focusInbound?: string;
+  onCrumb: (path: string) => void;
+  /** Navigates into a system box (double-click). */
+  onOpenSystem: (id: string) => void;
 }
 
 /** Renders the parsed diagram. Canvas edits are written back to the text, which stays the source of truth. */
@@ -1279,6 +1358,12 @@ function DiagramView({
   onNotice,
   cover,
   playback,
+  crumbs,
+  focusFile,
+  focusReadOnly,
+  focusInbound,
+  onCrumb,
+  onOpenSystem,
 }: DiagramViewProps) {
   const playing = playback.active;
   const { getNodes, screenToFlowPosition } = useReactFlow();
@@ -1442,7 +1527,12 @@ function DiagramView({
           if (moved.length > locked.length) onMoveNodes(moved.map((n) => ({ id: n.id, position: n.position })));
         }}
         onConnect={(connection) => connection.source && connection.target && onConnectNodes(connection.source, connection.target)}
-        onNodeDoubleClick={(_event, node) => !playing && promptRename(node)}
+        // A system box opens its team design; renaming it stays in its settings and the selection bar.
+        onNodeDoubleClick={(_event, node) => {
+          if (playing) return;
+          if (node.type === 'systemNode' || node.data?.system) onOpenSystem(node.id);
+          else promptRename(node);
+        }}
         onSelectionChange={handleSelectionChange}
         // Deleting goes through the text; React Flow's own delete would only hide the node until the next render.
         deleteKeyCode={null}
@@ -1456,7 +1546,12 @@ function DiagramView({
         {overlay && !playing && <FlowParticles flows={overlay.flows} nodes={overlay.nodes} />}
         <Controls showInteractive={false} />
         {playing && <PlaybackMiniMap view={playback} />}
-        {!playing && <Panel position="top-left">
+        {!playing && crumbs.length > 1 && (
+          <Panel position="top-left">
+            <Breadcrumbs crumbs={crumbs} file={focusFile} readOnly={focusReadOnly} inbound={focusInbound} onPick={onCrumb} />
+          </Panel>
+        )}
+        {!playing && crumbs.length === 1 && <Panel position="top-left">
           <div className="relative">
             <button
               type="button"
@@ -1566,12 +1661,76 @@ function DiagramView({
             edge={selectedNode ? undefined : selectedEdge}
             capacity={selectedNode ? diagram.capacity?.find((c) => c.node === selectedNode.id) : undefined}
             importedFrom={selectedNode ? importedNodes.get(selectedNode.id) : selectedEdge?.loc.file}
+            system={selectedNode ? (nodes.find((n) => n.id === selectedNode.id)?.data as SystemNodeData | undefined)?.system : undefined}
             onEdit={onEdit}
             onDelete={deleteSelection}
             onClose={() => setClosedSettings(single.id)}
           />
         </div>
       )}
+    </div>
+  );
+}
+
+/** Where the canvas is among the document's systems (Drone startup › Order Processing), with the way back. */
+function Breadcrumbs({ crumbs, file, readOnly, inbound, onPick }: { crumbs: Crumb[]; file?: string; readOnly?: boolean; inbound?: string; onPick: (path: string) => void }) {
+  const up = crumbs[crumbs.length - 2];
+  return (
+    <nav aria-label="Breadcrumb" className="flex max-w-[min(calc(100vw-7rem),36rem)] flex-col rounded border-bw-1 border-ink bg-surface py-1 pl-1 pr-3 shadow-brutal-sm">
+      <div className="flex min-w-0 items-center gap-1">
+        <button type="button" onClick={() => onPick(up.path)} aria-label={`Back to ${up.name}`} title={`Back to ${up.name}`} className={`${iconButton} !h-7 !w-7`}>
+          <ArrowLeft size={15} />
+        </button>
+        <ol className="flex min-w-0 items-center gap-1 text-sm">
+          {crumbs.map((c, i) => {
+            const last = i === crumbs.length - 1;
+            return (
+              <li key={c.path} className={`flex items-center gap-1 ${last ? 'min-w-0' : 'flex-none max-sm:[&:not(:first-child)]:hidden'}`}>
+                {i > 0 && <ChevronRight size={14} className="flex-none text-muted" aria-hidden="true" />}
+                {last ? (
+                  <span aria-current="page" className="truncate font-bold text-ink">
+                    {c.name}
+                  </span>
+                ) : (
+                  <button type="button" onClick={() => onPick(c.path)} className="max-w-[10rem] truncate rounded px-1 font-semibold text-ink/75 underline-offset-2 hover:text-ink hover:underline">
+                    {c.name}
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+        {file && (
+          <span className="ml-2 hidden flex-none font-mono text-xs text-muted md:inline" title={readOnly ? 'This design is in its own file, which cannot be edited here' : 'This design is in its own file, open in the code pane'}>
+            {file}
+            {readOnly && ' · read-only'}
+          </span>
+        )}
+      </div>
+      {inbound && (
+        <span className="min-w-0 truncate pb-0.5 pl-9 text-xs font-semibold text-ink/75" title="The load shown includes what the rest of the document sends into this design">
+          {inbound}
+        </span>
+      )}
+    </nav>
+  );
+}
+
+/** Above the code pane while it shows a team file: which file, whether it can be edited here, and the way back. */
+function TeamFileBar({ team, up, onBack }: { team: TeamFile; up: Crumb; onBack: (path: string) => void }) {
+  return (
+    <div className="border-b border-ink/15 bg-surface py-1 pl-1 pr-3 text-xs" aria-label="Team file" role="group">
+      <div className="flex min-w-0 items-center gap-2">
+        <button type="button" onClick={() => onBack(up.path)} title={`Back to ${up.name}`} className={`${iconButton} !h-7 !w-auto flex-none gap-1 !px-2 text-xs font-semibold`}>
+          <ArrowLeft size={14} aria-hidden="true" />
+          <span className="max-w-[8rem] truncate">{up.name}</span>
+        </button>
+        <span className="min-w-0 truncate font-mono text-ink" title={team.path}>
+          {team.path}
+        </span>
+        <span className={`ml-auto flex-none ${team.readOnly ? 'font-bold text-ink' : 'text-muted'}`}>{team.readOnly ? 'Read-only' : 'Saved in this browser'}</span>
+      </div>
+      {team.readOnly && <p className="pb-0.5 pl-2 pt-0.5 text-ink/75">{team.readOnly}</p>}
     </div>
   );
 }

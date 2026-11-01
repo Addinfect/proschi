@@ -488,8 +488,96 @@ var require_lz_string = __commonJS({
 import { atom, memberOf, read, update } from "claude-code";
 
 // ../frontend/src/dsl/imports.ts
-function joinImportPath(fromPath, importPath) {
-  const parts = importPath.startsWith("/") || !fromPath ? [] : fromPath.split("/").slice(0, -1);
+var ImportError = class extends Error {
+  name = "ImportError";
+};
+var MAX_SPEC_LENGTH = 1024;
+var SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9._ +-]*$/;
+var HOST = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*(?::\d{1,5})?$/;
+var REPO_SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9._-]*$/;
+var REF = /^[A-Za-z0-9_][A-Za-z0-9._/-]*$/;
+var SCHEME = /^([A-Za-z][A-Za-z0-9+.-]+):/;
+function isRemoteSpec(spec) {
+  return SCHEME.test(spec);
+}
+function isAbsolutePath(path) {
+  return /^[\\/]/.test(path) || /^[A-Za-z]:/.test(path);
+}
+function checkRef(ref, spec) {
+  if (!REF.test(ref) || ref.length > 200 || ref.includes("..") || ref.includes("//") || ref.endsWith("/") || ref.endsWith(".") || ref.endsWith(".lock") || ref.split("/").some((p) => p.startsWith("."))) {
+    throw new ImportError(`'${spec}' has an invalid ref '${ref}'; use a tag, branch or commit made of letters, digits, '.', '_', '-' and '/'`);
+  }
+}
+function repoPathSegments(path, spec) {
+  const parts = path.split("/");
+  if (!path || parts.some((p) => !SEGMENT.test(p) || p === "." || p === "..")) {
+    throw new ImportError(`'${spec}' has an invalid path in the repository; use a relative path like dir/file.proschi, without '..'`);
+  }
+  return parts;
+}
+function parseRemoteSpec(spec) {
+  const scheme = SCHEME.exec(spec)?.[1].toLowerCase();
+  if (!scheme) return void 0;
+  if (spec.length > MAX_SPEC_LENGTH) throw new ImportError(`Import source is longer than ${MAX_SPEC_LENGTH} characters`);
+  if (/[\s\0\\]/.test(spec)) throw new ImportError(`'${spec}' contains whitespace or a backslash`);
+  if (scheme === "git") {
+    const body = spec.slice(4);
+    const at = body.lastIndexOf("@");
+    const split2 = body.indexOf("//");
+    if (at === -1 || split2 === -1 || split2 > at) {
+      throw new ImportError(`'${spec}' is not a git source; write git:<host>/<org>/<repo>//<path/in/repo>@<ref>`);
+    }
+    const repo = body.slice(0, split2);
+    const path = body.slice(split2 + 2, at);
+    const ref = body.slice(at + 1);
+    const [host, ...names] = repo.split("/");
+    if (!HOST.test(host) || names.length < 2 || names.some((n) => !REPO_SEGMENT.test(n) || n.endsWith("."))) {
+      throw new ImportError(`'${spec}' names an invalid repository '${repo}'; write <host>/<org>/<repo>`);
+    }
+    repoPathSegments(path, spec);
+    checkRef(ref, spec);
+    return { kind: "git", repo, path, ref };
+  }
+  if (scheme === "http") throw new ImportError(`'${spec}' uses http://; only https:// imports are allowed`);
+  if (scheme !== "https") throw new ImportError(`'${spec}' is not a supported import source; use a relative path, git: or https://`);
+  let url;
+  try {
+    url = new URL(spec);
+  } catch {
+    throw new ImportError(`'${spec}' is not a valid URL`);
+  }
+  if (url.username || url.password) throw new ImportError(`'${spec}' contains credentials; git and https imports use your own credentials, never ones in the diagram`);
+  if (url.hash) throw new ImportError(`'${spec}' has a #fragment; remove it`);
+  if (!HOST.test(url.host)) throw new ImportError(`'${spec}' has an invalid host`);
+  return { kind: "https", url: url.href };
+}
+function formatRemoteSpec(spec) {
+  return spec.kind === "git" ? `git:${spec.repo}//${spec.path}@${spec.ref}` : spec.url;
+}
+function resolveImportPath(fromPath, importPath) {
+  if (importPath.includes("\0")) throw new ImportError(`'${importPath.replace(/\0/g, "")}' contains a NUL character`);
+  const remote = parseRemoteSpec(importPath);
+  if (remote) return formatRemoteSpec(remote);
+  if (isAbsolutePath(importPath)) throw new ImportError(`'${importPath}' is an absolute path; imports must be relative to the importing file`);
+  const from = fromPath && isRemoteSpec(fromPath) ? parseRemoteSpec(fromPath) : void 0;
+  if (from?.kind === "git") {
+    const parts2 = from.path.split("/").slice(0, -1);
+    for (const part of importPath.split("/")) {
+      if (part === "" || part === ".") continue;
+      if (part !== "..") parts2.push(part);
+      else if (parts2.length > 0) parts2.pop();
+      else throw new ImportError(`'${importPath}' leaves the repository ${from.repo}`);
+    }
+    repoPathSegments(parts2.join("/"), importPath);
+    return formatRemoteSpec({ ...from, path: parts2.join("/") });
+  }
+  if (from?.kind === "https") {
+    const base = new URL(from.url);
+    const url = new URL(importPath, base);
+    if (url.origin !== base.origin) throw new ImportError(`'${importPath}' leaves ${base.origin}`);
+    return formatRemoteSpec(parseRemoteSpec(url.href));
+  }
+  const parts = !fromPath ? [] : fromPath.split("/").slice(0, -1);
   for (const part of importPath.split("/")) {
     if (part === "" || part === ".") continue;
     if (part === ".." && parts.length > 0 && parts[parts.length - 1] !== "..") parts.pop();
@@ -497,11 +585,20 @@ function joinImportPath(fromPath, importPath) {
   }
   return parts.join("/");
 }
+function joinImportPath(fromPath, importPath) {
+  try {
+    return resolveImportPath(fromPath, importPath);
+  } catch (e) {
+    if (e instanceof ImportError) return void 0;
+    throw e;
+  }
+}
 function mapResolver(files) {
-  const paths = Object.keys(files);
+  const paths = Object.keys(files).filter((p) => !isRemoteSpec(p));
   return (importPath, fromPath) => {
-    const path = joinImportPath(fromPath, importPath);
+    const path = resolveImportPath(fromPath, importPath);
     if (Object.prototype.hasOwnProperty.call(files, path)) return { path, source: files[path] };
+    if (isRemoteSpec(path)) return void 0;
     const name = path.split("/").pop();
     const sameName = paths.filter((p) => p.split("/").pop() === name);
     return sameName.length === 1 ? { path: sameName[0], source: files[sameName[0]] } : void 0;
@@ -1274,6 +1371,8 @@ function editDistance2(a, b) {
 var HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 var DEFAULT_TECH = "Rectangle";
 var DEFAULT_GROUP_TECH = "Logical Group";
+var SYSTEM_TECH = "Service";
+var STUB_HELP = "a rate, p99, latency or availability, e.g. capacity { 2k rps p99 150ms availability 99.95% }";
 var MAX_SCENARIOS = 32;
 var MAX_ALT_DEPTH = 16;
 var DIRECTIONS = ["down", "right", "up", "left"];
@@ -1317,7 +1416,7 @@ function unknownTechMessage(tech, kind, suggestion) {
 function parse(source, options = {}) {
   return new Parser(source, options).run();
 }
-var Parser = class {
+var Parser = class _Parser {
   // Per-file state, swapped while an imported file is read.
   lines;
   /** Path of the imported file being read; undefined for the root document. */
@@ -1338,7 +1437,12 @@ var Parser = class {
   /** Files being read, outermost first, to find import cycles. */
   chain;
   /** Diagnostics are sorted by file in the order the files were first read, the root first. */
-  fileOrder = /* @__PURE__ */ new Map([[void 0, 0]]);
+  fileOrder;
+  /** The file read as the root: undefined for a document, the path for a system's team file (its own scope). */
+  rootFile;
+  teamFiles;
+  systems = [];
+  systemById = /* @__PURE__ */ new Map();
   /** `a|b` for every connection, both directions; filled before use cases are built. */
   connected = /* @__PURE__ */ new Set();
   title;
@@ -1360,14 +1464,18 @@ var Parser = class {
   deferred = [];
   built = [];
   options;
-  constructor(source, options) {
+  constructor(source, options, scope2) {
     this.options = options;
     this.lines = source.split("\n");
-    this.chain = [options.path];
+    this.chain = scope2 ? scope2.chain : [options.path];
+    this.teamFiles = scope2?.teamFiles ?? /* @__PURE__ */ new Map();
+    if (scope2) this.rootFile = this.file = options.path;
+    this.fileOrder = /* @__PURE__ */ new Map([[this.rootFile, 0]]);
     if (options.path !== void 0) this.included.add(options.path);
   }
   run() {
     this.parseFile();
+    this.resolvePorts();
     this.createImplicitNodes();
     this.resolveTags();
     for (const e of this.edges) this.connected.add(`${e.source}|${e.target}`).add(`${e.target}|${e.source}`);
@@ -1390,7 +1498,8 @@ var Parser = class {
       ...this.decisions.length ? { decisions: this.decisions } : {},
       ...this.tests.length ? { tests: this.tests } : {},
       ...this.legend.length ? { legend: this.legend } : {},
-      ...Object.keys(this.layout).length ? { layout: this.layout } : {}
+      ...Object.keys(this.layout).length ? { layout: this.layout } : {},
+      ...this.systems.length ? { systems: this.systems } : {}
     };
     const order = (d) => this.fileOrder.get(d.file) ?? 0;
     this.diagnostics.sort((a, b) => order(a) - order(b) || a.line - b.line || a.col - b.col);
@@ -1407,14 +1516,16 @@ var Parser = class {
       i = this.parseLine(i);
     }
     for (const frame2 of this.stack) {
-      const what = frame2.kind === "group" ? `group '${frame2.id}'` : frame2.kind === "usecase" ? `usecase '${frame2.useCase.name}'` : frame2.kind === "alt" ? `alt '${frame2.name}'` : frame2.kind === "par" ? "par block" : sectionName(frame2);
+      const what = frame2.kind === "group" ? `group '${frame2.id}'` : frame2.kind === "usecase" ? `usecase '${frame2.useCase.name}'` : frame2.kind === "alt" ? `alt '${frame2.name}'` : frame2.kind === "par" ? "par block" : frame2.kind === "system" ? `system '${frame2.system.id}'` : frame2.kind === "stub" ? `the capacity of system '${frame2.system.id}'` : sectionName(frame2);
       this.error(`Missing } to close ${what}`, frame2.loc);
+      if (frame2.kind === "system") this.finishSystem(frame2);
     }
   }
   /** Parses the line at `index` and returns the index of the last line it consumed. */
   parseLine(index) {
     const line = index + 1;
-    const { tokens, diagnostics } = tokenizeLine(this.lines[index], line);
+    const { tokens: lexed, diagnostics } = tokenizeLine(this.lines[index], line);
+    const tokens = qualify(lexed);
     this.diagnostics.push(...diagnostics.map((d) => ({ ...d, ...this.fileField() })));
     if (tokens.length === 0 || diagnostics.some((d) => d.severity === "error")) return index;
     const [first, second, third] = tokens;
@@ -1435,11 +1546,15 @@ var Parser = class {
       if (first.kind === "rbrace") {
         this.stack.pop();
         if (!top.discard) this.closeSection(top);
-        if (!top.discard && this.file === void 0) this.blocks.push({ kind: top.section, start: top.loc.line, end: line });
+        if (!top.discard && this.file === this.rootFile) this.blocks.push({ kind: top.section, start: top.loc.line, end: line });
         if (second) this.error("Unexpected input after }", loc(second));
       } else if (!top.discard) {
         this.parseSectionLine(top, tokens, line);
       }
+      return index;
+    }
+    if (top?.kind === "system" || top?.kind === "stub") {
+      this.parseSystemLine(top, tokens, line);
       return index;
     }
     if (first.kind === "rbrace") {
@@ -1462,6 +1577,11 @@ var Parser = class {
         break;
       case "group":
         this.parseGroup(tokens, line);
+        break;
+      // A keyword only as `system id … {`, so a node may still be called system.
+      case "system":
+        if (second?.kind === "ident" && tokens[tokens.length - 1].kind === "lbrace") this.parseSystem(tokens, line);
+        else this.parseNode(tokens, line);
         break;
       case "usecase":
         this.parseUseCase(tokens, line);
@@ -1517,7 +1637,7 @@ var Parser = class {
       return;
     }
     const summary = tokens[2]?.kind === "string" ? tokens[2] : void 0;
-    if (this.file === void 0) {
+    if (this.file === this.rootFile) {
       this.title = value.value;
       if (summary) this.summary = summary.value;
     }
@@ -1549,7 +1669,7 @@ var Parser = class {
       this.error("direction is only allowed at the top level or inside a group", this.locOf(keyword, line));
       return;
     }
-    if (this.file !== void 0) return;
+    if (this.file !== this.rootFile) return;
     if (this.layoutLocs.direction) {
       this.warning(`direction is already set ${this.where(this.layoutLocs.direction, loc)}; this one is ignored`, this.locOf(keyword, line));
       return;
@@ -1569,7 +1689,7 @@ var Parser = class {
       this.error("layout ordered applies to the whole diagram; write it at the top level", this.locOf(keyword, line));
       return;
     }
-    if (this.file !== void 0) return;
+    if (this.file !== this.rootFile) return;
     if (this.layoutLocs.ordered) {
       this.warning(`layout ordered is already set ${this.where(this.layoutLocs.ordered, loc)}`, this.locOf(keyword, line));
       return;
@@ -1624,16 +1744,8 @@ var Parser = class {
       this.warning(`Imports are not resolved in this context; '${path}' was not loaded`, loc);
       return;
     }
-    let target;
-    try {
-      target = resolve(path, this.file ?? this.options.path);
-    } catch {
-      target = void 0;
-    }
-    if (!target) {
-      this.error(`Cannot find '${path}'`, loc);
-      return;
-    }
+    const target = this.resolveFile(path, loc);
+    if (!target) return;
     entry.resolved = target.path;
     const cycleStart = this.chain.indexOf(target.path);
     if (cycleStart !== -1) {
@@ -1652,6 +1764,25 @@ var Parser = class {
     this.parseFile();
     this.chain.pop();
     ({ lines: this.lines, file: this.file, stack: this.stack } = outer);
+  }
+  /**
+   * Loads `path` through the resolver, relative to the file being read. A
+   * resolver error named `ImportError` (outside the project root, not synced,
+   * …) is reported with its own message; anything else is "Cannot find".
+   */
+  resolveFile(path, loc) {
+    let target;
+    try {
+      target = this.options.resolve?.(path, this.file ?? this.options.path);
+    } catch (e) {
+      if (e instanceof Error && e.name === "ImportError") {
+        this.error(e.message, loc);
+        return void 0;
+      }
+      target = void 0;
+    }
+    if (!target) this.error(`Cannot find '${path}'`, loc);
+    return target;
   }
   parseGroup(tokens, line) {
     const keyword = tokens[0];
@@ -1711,6 +1842,273 @@ var Parser = class {
     this.applyStyle(group, style);
     this.addNode(group);
     this.stack.push({ kind: "group", id: idToken.value, loc });
+  }
+  // ---- Systems: a team's design behind a contract (docs/design/team-systems-and-imports.md) ----
+  /** `system id ["Name"] [@team] [pos x,y] [color c] [.tag] [rank N] {` */
+  parseSystem(tokens, line) {
+    const [keyword, idToken] = tokens;
+    const top = this.top();
+    if (top && top.kind !== "group") {
+      this.error("A system is declared at the top level or inside a group", this.locOf(keyword, line));
+      this.skipSection("test", tokens, line);
+      return;
+    }
+    const loc = this.locOf(idToken, line);
+    const node = { id: idToken.value, kind: "system", name: idToken.value, type: "service", techStack: SYSTEM_TECH, parent: this.currentGroup(), loc };
+    const style = {};
+    let named = false;
+    let i = 2;
+    while (i < tokens.length - 1) {
+      const t = tokens[i];
+      const styleUsed = this.readStylePart(tokens, i, line, style, false);
+      const used = styleUsed === 0 ? this.readRank(tokens, i, line, node) : styleUsed;
+      if (used === void 0) return this.skipSection("test", tokens, line);
+      if (used > 0) {
+        i += used;
+        continue;
+      }
+      if (t.kind === "string" && !named) {
+        node.name = t.value;
+        named = true;
+      } else if (t.kind === "string" && node.description === void 0) {
+        node.description = t.value;
+      } else if (t.kind === "team") {
+        node.ownerTeam = t.value;
+      } else if (isWord(t, "pos")) {
+        const [x, comma, y] = [tokens[i + 1], tokens[i + 2], tokens[i + 3]];
+        if (x?.kind !== "number" || comma?.kind !== "comma" || y?.kind !== "number") {
+          this.error("Expected pos x,y", this.locOf(t, line));
+          return this.skipSection("test", tokens, line);
+        }
+        node.position = { x: Number(x.value), y: Number(y.value) };
+        i += 3;
+      } else {
+        this.error(`Unexpected ${describe(t)} in system header; write system id "Name" @Team {`, this.locOf(t, line));
+        return this.skipSection("test", tokens, line);
+      }
+      i++;
+    }
+    this.applyStyle(node, style);
+    const system = { id: node.id, entries: [], loc };
+    if (!this.nodes.has(node.id)) {
+      this.systems.push(system);
+      this.systemById.set(system.id, system);
+    }
+    this.addNode(node);
+    this.stack.push({ kind: "system", system, useCaseLocs: /* @__PURE__ */ new Map(), loc });
+  }
+  /** A line inside `system … { }` or its multi-line `capacity { }`. */
+  parseSystemLine(frame2, tokens, line) {
+    const [first, second] = tokens;
+    const { system } = frame2;
+    if (first.kind === "rbrace") {
+      this.stack.pop();
+      if (frame2.kind === "system") this.finishSystem(frame2);
+      if (second) this.error("Unexpected input after }", this.locOf(second, line));
+      return;
+    }
+    if (frame2.kind === "stub") {
+      this.readStub(system.stub, tokens, 0, tokens.length, line);
+      return;
+    }
+    if (isWord(first, "from")) {
+      if (second?.kind !== "string" || !second.value.trim()) {
+        this.error('Expected the team file, e.g. from "teams/orders.proschi"', this.locOf(second ?? first, line));
+        return;
+      }
+      if (system.from !== void 0) {
+        this.error(`System '${system.id}' already has from "${system.from}"`, this.locOf(first, line));
+        return;
+      }
+      this.expectEnd(tokens, 2, line);
+      system.from = second.value;
+      frame2.fromLoc = this.locOf(second, line);
+      return;
+    }
+    if (isWord(first, "expose")) return this.parseExpose(frame2, tokens, line);
+    if (isWord(first, "capacity") && second?.kind === "lbrace") {
+      const opens = tokens[tokens.length - 1].kind !== "rbrace";
+      if (system.stub) {
+        this.error(`System '${system.id}' already has a capacity`, this.locOf(first, line));
+        if (opens) this.stack.push({ kind: "section", section: "capacity", discard: true, loc: this.locOf(first, line) });
+        return;
+      }
+      const stub = { loc: this.lineLoc(tokens, line) };
+      system.stub = stub;
+      this.readStub(stub, tokens, 2, opens ? tokens.length : tokens.length - 1, line);
+      if (opens) this.stack.push({ kind: "stub", system, loc: this.locOf(first, line) });
+      return;
+    }
+    this.error('Inside a system, write from "file", expose <id> "Name" -> "Use case" or capacity { \u2026 }', this.locOf(first, line));
+    if (tokens[tokens.length - 1].kind === "lbrace") this.stack.push({ kind: "section", section: "test", discard: true, loc: this.locOf(first, line) });
+  }
+  /** `expose id ["Name"] [-> "Use case"]` */
+  parseExpose(frame2, tokens, line) {
+    const [keyword, idToken] = tokens;
+    if (idToken?.kind !== "ident") {
+      this.error('Expected an entry point id, e.g. expose api "Orders API" -> "Place order"', this.locOf(idToken ?? keyword, line));
+      return;
+    }
+    const entry = { id: idToken.value, name: idToken.value, loc: this.locOf(idToken, line) };
+    let i = 2;
+    if (tokens[i]?.kind === "string") entry.name = tokens[i++].value;
+    if (tokens[i]?.kind === "arrow") {
+      const useCase = tokens[i + 1];
+      if (tokens[i].value !== "->" || useCase?.kind !== "string" && useCase?.kind !== "ident") {
+        this.error('Expected -> "Use case" after the entry point', this.locOf(useCase ?? tokens[i], line));
+        return;
+      }
+      entry.useCase = useCase.value;
+      frame2.useCaseLocs.set(entry, this.locOf(useCase, line));
+      i += 2;
+    }
+    if (!this.expectEnd(tokens, i, line)) return;
+    if (frame2.system.entries.some((e) => e.id === entry.id)) {
+      this.error(`System '${frame2.system.id}' already exposes '${entry.id}'`, entry.loc);
+      return;
+    }
+    frame2.system.entries.push(entry);
+  }
+  /** The parts of a system's `capacity { … }` in `tokens[from, to)`. */
+  readStub(stub, tokens, from, to, line) {
+    for (let i = from; i < to; ) {
+      const t = tokens[i];
+      if (t.kind === "quantity" || t.kind === "number") {
+        const rps = this.quantityOf(t, "rps", t, line);
+        if (rps === void 0) return;
+        stub.rps = rps;
+        i++;
+      } else if (isWord(t, "p99") || isWord(t, "latency") || isWord(t, "availability")) {
+        const value = this.quantityOf(i + 1 < to ? tokens[i + 1] : void 0, t.value === "availability" ? "%" : "ms", t, line);
+        if (value === void 0) return;
+        if (t.value === "p99") stub.p99Ms = value;
+        else if (t.value === "latency") stub.latencyMs = value;
+        else stub.availability = value;
+        i += 2;
+      } else {
+        this.error(`Expected ${STUB_HELP}`, this.locOf(t, line));
+        return;
+      }
+    }
+  }
+  /** At the system's `}`: loads the team file and checks the entry points against its use cases. */
+  finishSystem(frame2) {
+    const { system } = frame2;
+    if (system.from !== void 0) {
+      const team2 = this.loadTeam(system.from, frame2.fromLoc ?? system.loc);
+      if (team2) {
+        system.resolved = team2.path;
+        system.diagram = team2.diagram;
+      }
+      if (system.stub) {
+        this.warning(`System '${system.id}' has a from file, which sets its contract; this capacity is ignored`, system.stub.loc);
+        if (team2) delete system.stub;
+      }
+    } else if (!system.stub) {
+      this.warning(`System '${system.id}' has no from "file" and no capacity { \u2026 }; it is drawn but not simulated`, system.loc);
+    }
+    const team = system.diagram;
+    if (!team) return;
+    const name = fileName(system.resolved ?? "");
+    for (const entry of system.entries) {
+      const wanted = entry.useCase;
+      if (wanted !== void 0) {
+        const u = findUseCaseIn(team, wanted);
+        if (u) entry.useCaseId = u.id;
+        else {
+          const near = team.useCases.find((x) => editDistance2(x.name.toLowerCase(), wanted.toLowerCase()) <= Math.max(1, Math.floor(wanted.length / 4)));
+          const all = team.useCases.map((x) => `"${x.name}"`).join(", ");
+          const help = near ? ` Did you mean "${near.name}"?` : all ? ` Its use cases are ${all}` : "";
+          this.error(`${name} has no use case "${wanted}".${help}`, frame2.useCaseLocs.get(entry) ?? entry.loc);
+        }
+      } else if (team.useCases.length === 1) {
+        entry.useCaseId = team.useCases[0].id;
+      } else if (team.useCases.length === 0) {
+        this.error(`${name} has no use case for '${entry.id}' to enter`, entry.loc);
+      } else {
+        this.error(`Say which use case '${entry.id}' enters, e.g. expose ${entry.id} -> "${team.useCases[0].name}"`, entry.loc);
+      }
+    }
+    if (system.entries.length === 0) this.warning(`System '${system.id}' exposes no entry point; add expose <id> -> "Use case" so others can call it`, system.loc);
+  }
+  /** Parses a team file in its own scope (once per root parse), through the import resolver. */
+  loadTeam(path, loc) {
+    if (!this.options.resolve) {
+      this.warning(`Files are not resolved in this context; '${path}' was not loaded`, loc);
+      return void 0;
+    }
+    const target = this.resolveFile(path, loc);
+    if (!target) return void 0;
+    const cycleStart = this.chain.indexOf(target.path);
+    if (cycleStart !== -1) {
+      const names = [...this.chain.slice(cycleStart), target.path].map((p) => fileName(p ?? ""));
+      this.error(`System cycle: ${names.join(" \u2192 ")}`, loc);
+      return void 0;
+    }
+    let result = this.teamFiles.get(target.path);
+    if (!result) {
+      const scope2 = { chain: [...this.chain, target.path], teamFiles: this.teamFiles };
+      result = new _Parser(target.source, { path: target.path, resolve: this.options.resolve }, scope2).run();
+      this.teamFiles.set(target.path, result);
+      for (const d of result.diagnostics) {
+        if (!this.fileOrder.has(d.file)) this.fileOrder.set(d.file, this.fileOrder.size);
+        this.diagnostics.push(d);
+      }
+    }
+    return { path: target.path, diagram: result.diagram };
+  }
+  /**
+   * Resolves `orders.api` references once every file is read: the entry point
+   * `api` of system `orders`. Edges and references then name the system, with
+   * the entry point in `sourcePort` / `targetPort`. On a connection to a
+   * non-system, `b.planned` stays what it always was: `b` with a tag.
+   */
+  resolvePorts() {
+    for (const ref of this.references) {
+      const dot = ref.id.indexOf(".");
+      if (dot === -1) continue;
+      const prefix = ref.id.slice(0, dot);
+      const port = ref.id.slice(dot + 1);
+      const system = this.systemById.get(prefix);
+      if (system) {
+        if (!system.entries.some((e) => e.id === port)) this.error(this.unexposedMessage(system, port), ref.loc);
+      } else if (ref.edgeTarget) {
+        ref.edgeTarget.tag = port;
+        this.tagRefs.push({ tag: port, loc: { ...ref.loc, col: ref.loc.col + dot, length: ref.loc.length - dot }, target: ref.edgeTarget });
+      } else {
+        this.error(`'${prefix}' is not a system, so '${ref.id}' names nothing; write ${prefix}, or declare system ${prefix} { \u2026 }`, ref.loc);
+      }
+      ref.id = prefix;
+    }
+    for (const edge of this.edges) {
+      const [source, sourcePort] = this.splitRef(edge.source);
+      const [target, targetPort] = this.splitRef(edge.target);
+      edge.source = source;
+      edge.target = target;
+      if (sourcePort !== void 0) edge.sourcePort = sourcePort;
+      if (targetPort !== void 0) edge.targetPort = targetPort;
+    }
+  }
+  unexposedMessage(system, port) {
+    const entries2 = system.entries.map((e) => `${system.id}.${e.id}`);
+    const known = entries2.length ? `; connect to ${entries2.join(" or ")}` : "";
+    const internal = system.diagram?.nodes.some((n) => n.id === port);
+    return internal ? `'${port}' is inside system '${system.id}' but is not an entry point; only entry points are reachable from outside: add expose ${port} -> "Use case"${known}` : `System '${system.id}' has no entry point '${port}'${known}`;
+  }
+  /** `orders.api` → `['orders', 'api']` when `orders` is a system; else the id up to its dot, without a port. */
+  splitRef(id) {
+    const dot = id.indexOf(".");
+    if (dot === -1) return [id, void 0];
+    const prefix = id.slice(0, dot);
+    return [prefix, this.systemById.has(prefix) ? id.slice(dot + 1) : void 0];
+  }
+  /** A step to a whole system enters its only entry point; with several it must name one. */
+  onlyEntry(id, loc) {
+    const system = this.systemById.get(id);
+    if (!system || system.entries.length === 0) return void 0;
+    if (system.entries.length === 1) return system.entries[0].id;
+    this.errorOnce(`Say which entry point of '${id}' this step enters: ${system.entries.map((e) => `${id}.${e.id}`).join(" or ")}`, loc);
+    return void 0;
   }
   parseUseCase(tokens, line) {
     const keyword = tokens[0];
@@ -1901,7 +2299,8 @@ var Parser = class {
     const from = fromToken.value;
     const to = toToken.value;
     const arrow = arrowToken.value;
-    this.references.push({ id: from, loc: this.locOf(fromToken, line) }, { id: to, loc: this.locOf(toToken, line) });
+    const toRef = { id: to, loc: this.locOf(toToken, line) };
+    this.references.push({ id: from, loc: this.locOf(fromToken, line) }, toRef);
     const top = this.top();
     const inUseCase = top?.kind === "usecase" || top?.kind === "alt" || top?.kind === "par";
     if (tagToken && inUseCase) {
@@ -1936,6 +2335,7 @@ var Parser = class {
         edge.tag = tagToken.value;
         this.tagRefs.push({ tag: tagToken.value, loc: this.locOf(tagToken, line), target: edge });
       }
+      if (!tagToken) toRef.edgeTarget = edge;
       this.edges.push(edge);
     }
     return lastLine;
@@ -2846,7 +3246,9 @@ var Parser = class {
     for (const step of raw) {
       this.checkConnection(step);
       if (step.arrow === "-->") {
-        const request2 = [...steps].reverse().find((s) => s.fromServiceId === step.to && s.toServiceId === step.from && !answered.has(s) && !s.failed);
+        const [respFrom] = this.splitRef(step.from);
+        const [respTo] = this.splitRef(step.to);
+        const request2 = [...steps].reverse().find((s) => s.fromServiceId === respTo && s.toServiceId === respFrom && !answered.has(s) && !s.failed);
         if (!request2) {
           this.warning(`Response has no matching request from '${step.to}' to '${step.from}'`, step.loc);
           continue;
@@ -2865,14 +3267,17 @@ var Parser = class {
         continue;
       }
       const label = parseStepLabel(step.label);
-      const target = this.nodes.get(step.to);
+      const [from, fromPort] = this.splitRef(step.from);
+      const [to, toPort] = this.splitRef(step.to);
+      const port = toPort ?? this.onlyEntry(to, step.loc);
+      const target = this.nodes.get(to);
       const isAsync = step.arrow === "->>";
       steps.push({
         id: `${prefix}-${steps.length + 1}`,
         stepOrder: steps.length,
         stepName: label.name || `${step.from} \u2192 ${step.to}`,
-        fromServiceId: step.from,
-        toServiceId: step.to,
+        fromServiceId: from,
+        toServiceId: to,
         protocol: inferProtocol(isAsync, label.method, target),
         httpMethod: label.method ?? "",
         endpoint: label.endpoint ?? "",
@@ -2888,7 +3293,9 @@ var Parser = class {
         loc: step.loc,
         ...step.multiplier !== void 0 ? { multiplier: step.multiplier } : {},
         ...step.sizeBytes !== void 0 ? { sizeBytes: step.sizeBytes } : {},
-        access: accessOf(label.method, step.label)
+        access: accessOf(label.method, step.label),
+        ...port !== void 0 ? { toPort: port } : {},
+        ...fromPort !== void 0 ? { fromPort } : {}
       });
     }
     return steps;
@@ -2898,8 +3305,10 @@ var Parser = class {
    * Documents without any connection are use-case-only sketches; they are left alone.
    */
   checkConnection(step) {
-    if (this.edges.length === 0 || step.from === step.to || this.connected.has(`${step.from}|${step.to}`)) return;
-    const [from, to] = step.arrow === "-->" ? [step.to, step.from] : [step.from, step.to];
+    const [a] = this.splitRef(step.from);
+    const [b] = this.splitRef(step.to);
+    if (this.edges.length === 0 || a === b || this.connected.has(`${a}|${b}`)) return;
+    const [from, to] = step.arrow === "-->" ? [b, a] : [a, b];
     this.warning(`No connection between '${from}' and '${to}' in the architecture; add '${from} -> ${to}'`, step.loc);
   }
   createImplicitNodes() {
@@ -2995,6 +3404,17 @@ var Parser = class {
   error(message, loc) {
     this.diagnostics.push({ severity: "error", message, ...loc });
   }
+  /** An error for a step that every scenario sharing it would report again. */
+  errorOnce(message, loc) {
+    const key = `error
+${loc.file ?? ""}
+${loc.line}
+${loc.col}
+${message}`;
+    if (this.warned.has(key)) return;
+    this.warned.add(key);
+    this.error(message, loc);
+  }
   warning(message, loc) {
     const key = `${loc.file ?? ""}
 ${loc.line}
@@ -3029,6 +3449,23 @@ function expand(items) {
     paths = next;
   }
   return paths;
+}
+function qualify(tokens) {
+  let out;
+  for (let i = 0; i < tokens.length; i++) {
+    const [t, next] = [tokens[i], tokens[i + 1]];
+    const joined = t.kind === "ident" && next?.kind === "tag" && next.col === t.col + t.length;
+    if (joined && (tokens[i + 2]?.kind === "arrow" || tokens[i - 1]?.kind === "arrow")) {
+      out ??= tokens.slice(0, i);
+      out.push({ ...t, value: `${t.value}.${next.value}`, length: t.length + next.length });
+      i++;
+    } else out?.push(t);
+  }
+  return out ?? tokens;
+}
+function findUseCaseIn(diagram, name) {
+  const lower = name.toLowerCase();
+  return diagram.useCases.find((u) => u.name === name) ?? diagram.useCases.find((u) => u.name.toLowerCase() === lower) ?? diagram.useCases.find((u) => u.id === name);
 }
 function isWord(token, word) {
   return token?.kind === "ident" && token.value === word;
@@ -3470,6 +3907,340 @@ function formatUsd(usd) {
   return `$${Math.round(usd).toLocaleString("en-US")}/month`;
 }
 
+// ../frontend/src/sim/overlay.ts
+function flowsOf(diagram, traffic) {
+  const flows = /* @__PURE__ */ new Map();
+  for (const t of traffic) {
+    const u = findUseCase(diagram, t.useCase);
+    if (!u || t.rps <= 0) continue;
+    for (const sc of u.scenarios) {
+      const share = t.mix ? t.mix.find((m) => m.scenario === sc.name)?.share ?? 0 : sc === u.scenarios[0] ? 1 : 0;
+      if (share <= 0) continue;
+      for (const step of sc.steps) {
+        if (step.failed) continue;
+        const key = `${step.fromServiceId}>${step.toServiceId}`;
+        const f = flows.get(key) ?? { from: step.fromServiceId, to: step.toServiceId, rps: 0, async: step.executionType !== "SYNC_REQUEST_RESPONSE" };
+        f.rps += t.rps * share * (step.multiplier ?? 1);
+        flows.set(key, f);
+      }
+    }
+  }
+  return [...flows.values()];
+}
+function analysisOverlay(diagram, analysis) {
+  const nodes = {};
+  for (const n of analysis.nodes) {
+    const works = Number.isFinite(n.capacityRps) && n.kind !== "client";
+    nodes[n.id] = {
+      ...works ? { utilization: n.utilization, saturated: n.saturated } : {},
+      ...n.replicas > 1 ? { replicas: n.replicas } : {},
+      ...n.shards > 1 ? { shards: n.shards } : {}
+    };
+  }
+  return { nodes, flows: flowsOf(diagram, diagram.traffic ?? []) };
+}
+
+// ../frontend/src/sim/systems.ts
+var teamKey = (s) => s.resolved ?? s.diagram;
+var contracts = /* @__PURE__ */ new WeakMap();
+function contractOf(system, options = {}) {
+  let contract = contracts.get(system);
+  if (!contract) {
+    contract = system.diagram ? designContract(system, system.diagram, options) : stubContract(system);
+    contracts.set(system, contract);
+  }
+  return contract;
+}
+function stubContract(system) {
+  const stub = system.stub;
+  if (!stub) return { source: "none", entries: system.entries.map((e) => emptyEntry(e.id, e.name)) };
+  const rps = stub.rps ?? Infinity;
+  return {
+    source: "stub",
+    entries: system.entries.map((e) => ({
+      ...emptyEntry(e.id, e.name),
+      latency: stub.p99Ms !== void 0 ? [{ percentile: 99, maxMs: stub.p99Ms }] : [],
+      ...stub.availability !== void 0 ? { availabilityPercent: stub.availability } : {},
+      saturatesAtRps: rps,
+      hotAtRps: rps * HOT
+    }))
+  };
+}
+var emptyEntry = (entry, name) => ({ entry, name, ownRps: 0, latency: [], saturatesAtRps: Infinity, hotAtRps: Infinity });
+function designContract(system, team, options) {
+  const traffic = resolveTraffic(team);
+  const base = computeLoad(team, traffic);
+  const baseBytes = computeBytesPerSecond(team, traffic);
+  const profiles = profilesOf(team);
+  const nodes = components(team);
+  const entries2 = system.entries.map((e) => {
+    const u = team.useCases.find((x) => x.id === e.useCaseId);
+    if (!u) return emptyEntry(e.id, e.name);
+    const own = traffic.get(u.id);
+    const unit = /* @__PURE__ */ new Map([[u.id, { rps: 1, shares: own.shares }]]);
+    const delta = computeLoad(team, unit);
+    const deltaBytes = computeBytesPerSecond(team, unit);
+    const result = { ...emptyEntry(e.id, e.name), useCase: u.name, ownRps: own.rps };
+    for (const n of nodes) {
+      const d = delta.get(n.id);
+      const db = deltaBytes.get(n.id) ?? 0;
+      if (!d && !db) continue;
+      const p = profiles.get(n.id);
+      const replicas = replicasOf(n);
+      const b = base.get(n.id) ?? { read: 0, write: 0 };
+      const bb = baseBytes.get(n.id) ?? 0;
+      const u0 = usageOf(p, replicas, b.read, b.write, bb);
+      const u1 = usageOf(p, replicas, b.read + (d?.read ?? 0), b.write + (d?.write ?? 0), bb + db);
+      const sat = crossing(u0, u1, 1);
+      const hot = crossing(u0, u1, HOT);
+      if (sat < result.saturatesAtRps) {
+        result.saturatesAtRps = sat;
+        result.bottleneck = n.id;
+      }
+      if (hot < result.hotAtRps) {
+        result.hotAtRps = hot;
+        result.hotNode = n.id;
+      }
+    }
+    for (const r of team.requirements ?? []) {
+      if (r.kind !== "latency" && r.kind !== "availability") continue;
+      if (r.useCase !== void 0 && findUseCase(team, r.useCase) !== u) continue;
+      if (r.kind === "latency") result.latency.push({ percentile: r.percentile, maxMs: r.maxMs, ...r.scenario !== void 0 ? { scenario: r.scenario } : {} });
+      else result.availabilityPercent = Math.max(result.availabilityPercent ?? 0, r.minPercent);
+    }
+    return result;
+  });
+  return { source: "design", entries: entries2, baseline: analyze(team, { timeoutMs: options.timeoutMs }) };
+}
+function crossing(u0, u1, theta) {
+  const terms = u0.writeScaling === "shards" ? [
+    [u0.readUtilization, u1.readUtilization],
+    [u0.writeUtilization, u1.writeUtilization]
+  ] : [[u0.requestUtilization, u1.requestUtilization]];
+  terms.push([u0.bandwidthUtilization, u1.bandwidthUtilization]);
+  let best = Infinity;
+  for (const [a, b] of terms) {
+    const slope = b - a;
+    if (slope <= 1e-15) continue;
+    if (a >= theta) return 0;
+    best = Math.min(best, (theta - a) / slope);
+  }
+  return best;
+}
+function inboundLoad(diagram, traffic) {
+  const result = /* @__PURE__ */ new Map();
+  forEachStepRate(diagram, traffic, (step, rate) => {
+    if (step.toPort === void 0) return;
+    const ports = result.get(step.toServiceId) ?? /* @__PURE__ */ new Map();
+    ports.set(step.toPort, (ports.get(step.toPort) ?? 0) + rate * multiplierOf(step));
+    result.set(step.toServiceId, ports);
+  });
+  return result;
+}
+function hopFrom(p50, p99) {
+  const l50 = tailFactor(0.5);
+  const l99 = tailFactor(0.99);
+  let tailMs = Math.max(0, (p99 - p50) / (l99 - l50));
+  let fixedMs = p50 - tailMs * l50;
+  if (fixedMs < 0) {
+    fixedMs = 0;
+    tailMs = p99 / l99;
+  }
+  return { fixedMs, tailMs, waitProbability: 0 };
+}
+function analyzeSystems(diagram, traffic, options = {}) {
+  const inbound = inboundLoad(diagram, traffic);
+  if (!options.sharedSystems) options = { ...options, sharedSystems: sharedLoad(diagram, inbound) };
+  const hops = /* @__PURE__ */ new Map();
+  const availabilities = /* @__PURE__ */ new Map();
+  const key = (id, port) => `${id}
+${port}`;
+  const systems = (diagram.systems ?? []).map((system) => {
+    const result = analyzeSystem(system, inbound.get(system.id) ?? /* @__PURE__ */ new Map(), options);
+    for (const e of result.entries) {
+      hops.set(key(system.id, e.entry), hopFrom(e.p50Ms, e.p99Ms));
+      availabilities.set(key(system.id, e.entry), e.availability);
+    }
+    return result;
+  });
+  return {
+    systems,
+    hop: (id, port) => port === void 0 ? void 0 : hops.get(key(id, port)),
+    availability: (id, port) => port === void 0 ? void 0 : availabilities.get(key(id, port))
+  };
+}
+function sentByUseCase(system, sent, into) {
+  let total = 0;
+  for (const e of system.entries) {
+    const rps = sent.get(e.id) ?? 0;
+    if (rps <= 0 || e.useCaseId === void 0) continue;
+    into.set(e.useCaseId, (into.get(e.useCaseId) ?? 0) + rps);
+    total += rps;
+  }
+  return total;
+}
+function sharedLoad(root, rootInbound) {
+  const byFile = /* @__PURE__ */ new Map();
+  const designs = /* @__PURE__ */ new Map();
+  const order = [];
+  const visit = (d, prefix) => {
+    for (const s of d.systems ?? []) {
+      if (!s.diagram) continue;
+      const key = teamKey(s);
+      if (designs.has(key)) continue;
+      const path = prefix ? `${prefix}.${s.id}` : s.id;
+      designs.set(key, { diagram: s.diagram, path, loc: s.loc });
+      visit(s.diagram, path);
+      order.push(key);
+    }
+  };
+  visit(root, "");
+  const send = (d, prefix, inbound) => {
+    for (const s of d.systems ?? []) {
+      if (!s.diagram) continue;
+      const key = teamKey(s);
+      const load = byFile.get(key) ?? { useCases: /* @__PURE__ */ new Map(), callers: [] };
+      byFile.set(key, load);
+      const rps = sentByUseCase(s, inbound.get(s.id) ?? /* @__PURE__ */ new Map(), load.useCases);
+      if (rps > 0) load.callers.push({ path: prefix ? `${prefix}.${s.id}` : s.id, ...d.title !== void 0 ? { from: d.title } : {}, rps });
+    }
+  };
+  send(root, "", rootInbound);
+  for (const key of order.reverse()) {
+    const { diagram, path, loc } = designs.get(key);
+    if (!diagram.systems?.length) continue;
+    const combined = withExtraTraffic(diagram, byFile.get(key)?.useCases ?? /* @__PURE__ */ new Map(), loc);
+    send(diagram, path, inboundLoad(combined, resolveTraffic(combined)));
+  }
+  return { byFile, analyses: /* @__PURE__ */ new Map() };
+}
+function analyzeSystem(system, sent, options) {
+  const contract = contractOf(system, options);
+  const inbound = system.entries.map((e) => ({ entry: e.id, rps: sent.get(e.id) ?? 0 }));
+  const totalInboundRps = inbound.reduce((sum, e) => sum + e.rps, 0);
+  const result = { id: system.id, contract, inbound, totalInboundRps, utilization: 0, saturated: false, hot: false, breaches: [], entries: [], warnings: [] };
+  const shared = system.diagram ? options.sharedSystems?.byFile.get(teamKey(system)) : void 0;
+  const sending = inbound.filter((e) => e.rps > 0).map((e) => {
+    const c = contract.entries.find((x) => x.entry === e.entry);
+    const useCaseId = system.entries.find((x) => x.id === e.entry)?.useCaseId;
+    const gets = useCaseId !== void 0 ? shared?.useCases.get(useCaseId) ?? 0 : 0;
+    const rps = gets > e.rps * (1 + 1e-9) ? `${formatRps(e.rps).replace(/ rps$/, "")} of the ${formatRps(gets)} it gets` : formatRps(e.rps);
+    return `${rps} into ${c?.useCase ? `"${c.useCase}" (${system.id}.${e.entry})` : `${system.id}.${e.entry}`}`;
+  }).join(" and ");
+  const label = `'${system.id}'`;
+  if (contract.source === "stub") {
+    const stub = system.stub;
+    const rps = stub.rps ?? Infinity;
+    result.utilization = Number.isFinite(rps) && rps > 0 ? totalInboundRps / rps : 0;
+    result.saturated = result.utilization >= 1;
+    result.hot = !result.saturated && result.utilization > HOT;
+    const base = stub.latencyMs ?? (stub.p99Ms !== void 0 ? stub.p99Ms / (1 - SERVICE_SPREAD + SERVICE_SPREAD * tailFactor(0.99)) : 0);
+    const hop = hopModel(base, 0);
+    const at = (p) => hop.fixedMs + hop.tailMs * tailFactor(p);
+    const availability2 = stub.availability !== void 0 ? stub.availability / 100 : 1;
+    result.entries = system.entries.map((e) => ({ entry: e.id, p50Ms: at(0.5), p99Ms: at(0.99), availability: availability2 }));
+    if (result.saturated) {
+      result.warnings.push(`${label} cannot take what it is sent: you send ${sending}; it takes at most ${formatRps(rps)}.`);
+      if (stub.p99Ms !== void 0) result.breaches.push({ requirement: `p99 < ${formatMs(stub.p99Ms)}`, message: `p99 is not held past ${formatRps(rps)}` });
+    } else if (result.hot) result.warnings.push(`${label} runs hot under what it is sent: you send ${sending}; it runs hot past ${formatRps(rps * HOT)} and takes at most ${formatRps(rps)}.`);
+    return result;
+  }
+  if (contract.source === "none" || !system.diagram) {
+    result.entries = system.entries.map((e) => ({ entry: e.id, p50Ms: 0, p99Ms: 0, availability: 1 }));
+    return result;
+  }
+  const team = system.diagram;
+  const key = teamKey(system);
+  const sentToTeam = shared?.useCases ?? /* @__PURE__ */ new Map();
+  if (!shared) sentByUseCase(system, sent, sentToTeam);
+  const sharedInboundRps = [...sentToTeam.values()].reduce((sum, rps) => sum + rps, 0);
+  result.callers = shared?.callers ?? (totalInboundRps > 0 ? [{ path: system.id, rps: totalInboundRps }] : []);
+  result.sharedInboundRps = sharedInboundRps;
+  let cached = options.sharedSystems?.analyses.get(key);
+  if (!cached) {
+    const combined = sharedInboundRps > 0 ? withExtraTraffic(team, sentToTeam, system.loc) : team;
+    const nested = { timeoutMs: options.timeoutMs, ...options.sharedSystems ? { sharedSystems: options.sharedSystems } : {} };
+    cached = { combined, analysis: sharedInboundRps > 0 ? analyze(combined, nested) : contract.baseline };
+    options.sharedSystems?.analyses.set(key, cached);
+  }
+  const { analysis } = cached;
+  result.analysis = analysis;
+  result.overlay = analysisOverlay(cached.combined, analysis);
+  const busiest = analysis.nodes.reduce((best, n) => !best || n.utilization > best.utilization ? n : best, void 0);
+  result.utilization = busiest?.utilization ?? 0;
+  result.busiest = busiest?.id;
+  result.saturated = !!busiest?.saturated;
+  result.hot = !result.saturated && result.utilization > HOT;
+  const byId = new Map(analysis.useCases.map((u) => [u.id, u]));
+  result.entries = system.entries.map((e) => {
+    const u = e.useCaseId !== void 0 ? byId.get(e.useCaseId) : void 0;
+    return { entry: e.id, p50Ms: u?.percentiles.p50 ?? 0, p99Ms: u?.percentiles.p99 ?? 0, availability: u?.availability ?? 1 };
+  });
+  if (totalInboundRps === 0) return result;
+  result.breaches = breachesOf(team, sentToTeam, analysis);
+  const first = contract.entries.find((c) => inbound.some((e) => e.entry === c.entry && e.rps > 0));
+  if (result.saturated && busiest) {
+    const onOwn = first && first.saturatesAtRps === 0;
+    const limit = first && Number.isFinite(first.saturatesAtRps) ? `; it takes at most ${formatRps(first.saturatesAtRps)} before its ${first.bottleneck} saturates` : "";
+    result.warnings.push(
+      onOwn ? `${label} is saturated on its own traffic, before what it is sent: its ${busiest.id} is at ${usageText(busiest)}.` : `${label} cannot take what it is sent: you send ${sending}${limit}. Its ${busiest.id} is at ${usageText(busiest)}.`
+    );
+  } else if (result.hot && busiest) {
+    const limit = first && Number.isFinite(first.hotAtRps) ? `; it runs hot past ${formatRps(first.hotAtRps)}` : "";
+    result.warnings.push(`${label} runs hot under what it is sent: you send ${sending}${limit}. Its ${busiest.id} is at ${usageText(busiest)}.`);
+  }
+  for (const b of result.breaches) result.warnings.push(`${label} breaks its SLA under what it is sent: ${b.message}.`);
+  return result;
+}
+function withExtraTraffic(team, extra, loc) {
+  const traffic = [...team.traffic ?? []];
+  for (const [id, rps] of extra) {
+    const u = team.useCases.find((x) => x.id === id);
+    if (!u || rps <= 0) continue;
+    const i = traffic.findIndex((t) => findUseCase(team, t.useCase) === u);
+    if (i >= 0) traffic[i] = { ...traffic[i], rps: traffic[i].rps + rps };
+    else traffic.push({ useCase: u.name, rps, loc });
+  }
+  return { ...team, traffic };
+}
+function breachesOf(team, sent, analysis) {
+  const entered = /* @__PURE__ */ new Set();
+  for (const [id, rps] of sent) {
+    const u = team.useCases.find((x) => x.id === id);
+    if (u && rps > 0) entered.add(u);
+  }
+  const nodes = new Map(analysis.nodes.map((n) => [n.id, n]));
+  const results = new Map(analysis.useCases.map((u) => [u.id, u]));
+  const breaches = [];
+  for (const r of team.requirements ?? []) {
+    if (r.kind !== "latency" && r.kind !== "availability") continue;
+    const targets = r.useCase === void 0 ? [...entered] : [findUseCase(team, r.useCase)].filter((u) => !!u && entered.has(u));
+    for (const u of targets) {
+      const ua = results.get(u.id);
+      const under = `under ${formatRps(ua.rps)}`;
+      if (r.kind === "availability") {
+        const name2 = `availability of "${u.name}" \u2265 ${r.minPercent}%`;
+        if (ua.availability * 100 < r.minPercent - 1e-9) breaches.push({ requirement: name2, message: `availability of "${u.name}" is ${formatAvailability(ua.availability)} ${under} (limit ${r.minPercent}%)` });
+        continue;
+      }
+      const key = PERCENTILE_KEYS[r.percentile];
+      const scenario = r.scenario !== void 0 ? findScenario(u, r.scenario) : void 0;
+      if (r.scenario !== void 0 && !scenario) continue;
+      const what = `${key} of "${u.name}"${scenario ? ` scenario "${scenario.name}"` : ""}`;
+      const name = `${what} < ${formatMs(r.maxMs)}`;
+      const steps = scenario ? scenario.steps : u.scenarios.flatMap((s) => s.steps);
+      const saturated = steps.map((s) => nodes.get(s.toServiceId)).reduce((best, n) => n?.saturated && (!best || n.utilization > best.utilization) ? n : best, void 0);
+      if (saturated) {
+        breaches.push({ requirement: name, message: `${what}: ${saturated.id} is saturated (${usageText(saturated)}) ${under} (limit ${formatMs(r.maxMs)})` });
+        continue;
+      }
+      const ms = scenario ? ua.scenarios[u.scenarios.indexOf(scenario)].percentiles[key] : ua.percentiles[key];
+      if (ms >= r.maxMs) breaches.push({ requirement: name, message: `${what} is ${formatMs(ms)} ${under} (limit ${formatMs(r.maxMs)})` });
+    }
+  }
+  return breaches;
+}
+
 // ../frontend/src/sim/analyze.ts
 var DEFAULT_TIMEOUT_MS = 1e3;
 var HOT = 0.7;
@@ -3627,6 +4398,7 @@ function usageText(n) {
     return `bandwidth ${mb(n.bandwidthLoadMBps)} of ${mb(n.bandwidthCapacityMBps)}, ${formatPercent(n.bandwidthUtilization)}`;
   }
   if (n.writeScaling === "shards" && n.writeLoadRps > 0) {
+    if (n.readLoadRps <= 0) return `writes ${part(n.writeLoadRps, n.writeCapacityRps, n.writeUtilization)}`;
     return `reads ${part(n.readLoadRps, n.readCapacityRps, n.readUtilization)}; writes ${part(n.writeLoadRps, n.writeCapacityRps, n.writeUtilization)}`;
   }
   return part(n.loadRps, n.capacityRps, n.requestUtilization);
@@ -3712,6 +4484,7 @@ function analyze(diagram, options = {}) {
   const load = computeLoad(diagram, traffic);
   const egress = computeEgressGb(diagram, traffic, kindOf2);
   const bytes = computeBytesPerSecond(diagram, traffic);
+  const systems = diagram.systems?.length ? analyzeSystems(diagram, traffic, options) : void 0;
   const hops = /* @__PURE__ */ new Map();
   const nodeResults = nodes.map((n) => {
     const p = profiles.get(n.id);
@@ -3750,12 +4523,13 @@ function analyze(diagram, options = {}) {
     if (n.saturated) warnings.push(`'${n.id}' is saturated: ${usage}. ${writeBound(n) ? "Add shards for writes" : "Add replicas"} or take load off it.`);
     else if (n.utilization > HOT) warnings.push(`'${n.id}' runs hot: ${usage}.`);
   }
+  for (const s of systems?.systems ?? []) warnings.push(...s.warnings);
   const access = accessIn(diagram);
   const pathOf = (hopsOfPath) => ({
     parts: hopsOfPath.map(
       (part) => part.map((h2) => {
         if (h2.failed) return { fixedMs: timeoutOf(h2.target), tailMs: 0 };
-        const hop = hops.get(h2.target) ?? { fixedMs: 0, tailMs: 0 };
+        const hop = systems?.hop(h2.target, h2.step.toPort) ?? hops.get(h2.target) ?? { fixedMs: 0, tailMs: 0 };
         return { fixedMs: transferMs(h2.step, bandwidthOf) + hop.fixedMs, tailMs: hop.tailMs };
       })
     )
@@ -3785,6 +4559,7 @@ function analyze(diagram, options = {}) {
     const writes = mainWrites(u, shares, (step) => access(step) === "write");
     const availabilityOf = (id) => {
       const n = nodeById.get(id);
+      if (!n && systems) return systemAvailability(u, id, systems.availability);
       return !n ? 1 : writes.has(id) ? n.writeAvailability : n.availability;
     };
     return { id: u.id, name: u.name, rps, scenarios, percentiles, tailScenario, availability: useCaseAvailability(u, shares, availabilityOf) };
@@ -3795,8 +4570,14 @@ function analyze(diagram, options = {}) {
     totalCostUsd: nodeResults.reduce((sum, n) => sum + n.costUsd, 0),
     totalEgressUsd: nodeResults.reduce((sum, n) => sum + n.egressUsd, 0),
     singlePointsOfFailure: singlePointsOfFailure(diagram),
-    warnings
+    warnings,
+    ...systems ? { systems: systems.systems } : {}
   };
+}
+function systemAvailability(u, id, availability2) {
+  let result = 1;
+  for (const s of u.scenarios) for (const step of s.steps) if (step.toServiceId === id) result = Math.min(result, availability2(id, step.toPort) ?? 1);
+  return result;
 }
 function mainWrites(useCase, shares, isWrite) {
   if (useCase.scenarios.length === 0) return /* @__PURE__ */ new Set();
@@ -3847,6 +4628,7 @@ function runTests(diagram, analysis = analyze(diagram), options = {}) {
     const { passed, message, hint } = requirement(run, r);
     return { id: `req:${i + 1}`, name: requirementName(r), category: CATEGORY[r.kind], passed, message, hint, loc: r.loc };
   });
+  results.push(...systemResults(diagram, analysis));
   const names = /* @__PURE__ */ new Map();
   for (const test of diagram.tests ?? []) {
     const n = (names.get(test.name) ?? 0) + 1;
@@ -3854,6 +4636,26 @@ function runTests(diagram, analysis = analyze(diagram), options = {}) {
     results.push({ id: n === 1 ? `test:${test.name}` : `test:${test.name}#${n}`, name: test.name, category: "flow", ...flowTest(run, test), loc: test.loc });
   }
   return results.map(({ hint, ...r }) => r.passed || !hint ? r : { ...r, hint });
+}
+function systemResults(diagram, analysis) {
+  return (analysis.systems ?? []).filter((s) => s.totalInboundRps > 0 && s.contract.source !== "none").map((s) => {
+    const system = diagram.systems?.find((x) => x.id === s.id);
+    const node = diagram.nodes.find((n) => n.id === s.id);
+    const team = node?.ownerTeam ? `the ${node.ownerTeam} team` : `the owners of ${s.id}`;
+    const problem = s.warnings.find((w) => !w.includes(" runs hot "));
+    const sat = s.contract.entries.find((e) => s.inbound.some((i) => i.entry === e.entry && i.rps > 0));
+    const room = sat && Number.isFinite(sat.saturatesAtRps) ? `; it takes at most ${formatRps(sat.saturatesAtRps)}` : "";
+    const bottleneck = s.saturated && s.busiest ? ` (their bottleneck is ${s.busiest})` : "";
+    return {
+      id: `system:${s.id}`,
+      name: `${s.id} takes what it is sent`,
+      category: s.breaches.some((b) => b.requirement.startsWith("availability")) && !s.saturated ? "availability" : "latency",
+      passed: !problem,
+      message: problem ?? `'${s.id}' takes ${formatRps(s.totalInboundRps)}${(s.sharedInboundRps ?? 0) > s.totalInboundRps * (1 + 1e-9) ? ` (of the ${formatRps(s.sharedInboundRps)} it gets)` : ""}${s.contract.source === "stub" ? "" : " on top of its own traffic"} and holds its requirements${room}`,
+      ...problem ? { hint: `Send it less, or ask ${team} to add capacity for it${bottleneck}` } : {},
+      ...system ? { loc: system.loc } : {}
+    };
+  });
 }
 var CATEGORY = {
   latency: "latency",
@@ -4384,37 +5186,207 @@ function noPath(run, from, to) {
   return pass(`No connection or step goes directly from ${x} to ${y}`);
 }
 
-// ../frontend/src/sim/overlay.ts
-function flowsOf(diagram, traffic) {
-  const flows = /* @__PURE__ */ new Map();
-  for (const t of traffic) {
-    const u = findUseCase(diagram, t.useCase);
-    if (!u || t.rps <= 0) continue;
-    for (const sc of u.scenarios) {
-      const share = t.mix ? t.mix.find((m) => m.scenario === sc.name)?.share ?? 0 : sc === u.scenarios[0] ? 1 : 0;
-      if (share <= 0) continue;
-      for (const step of sc.steps) {
-        if (step.failed) continue;
-        const key = `${step.fromServiceId}>${step.toServiceId}`;
-        const f = flows.get(key) ?? { from: step.fromServiceId, to: step.toServiceId, rps: 0, async: step.executionType !== "SYNC_REQUEST_RESPONSE" };
-        f.rps += t.rps * share * (step.multiplier ?? 1);
-        flows.set(key, f);
-      }
+// ../frontend/src/dsl/view.ts
+var FRAME_TECH = "Service Group";
+function viewDiagram(diagram, options = {}) {
+  const expanded = options.expanded ?? /* @__PURE__ */ new Set();
+  if (options.focus !== void 0) {
+    const team = systemAt(diagram, options.focus);
+    if (team?.diagram) {
+      const prefix = `${options.focus}.`;
+      const inner = new Set([...expanded].filter((id) => id.startsWith(prefix)).map((id) => id.slice(prefix.length)));
+      return viewDiagram(team.diagram, { expanded: inner });
     }
   }
-  return [...flows.values()];
-}
-function analysisOverlay(diagram, analysis) {
-  const nodes = {};
-  for (const n of analysis.nodes) {
-    const works = Number.isFinite(n.capacityRps) && n.kind !== "client";
-    nodes[n.id] = {
-      ...works ? { utilization: n.utilization, saturated: n.saturated } : {},
-      ...n.replicas > 1 ? { replicas: n.replicas } : {},
-      ...n.shards > 1 ? { shards: n.shards } : {}
-    };
+  const open = (diagram.systems ?? []).filter((s) => s.diagram && expanded.has(s.id));
+  if (open.length === 0) return diagram;
+  const nodes = [];
+  const edges = [];
+  const useCases = [];
+  const route = entryRouter(diagram, expanded, "");
+  const openIds = new Set(open.map((s) => s.id));
+  for (const node of diagram.nodes) {
+    if (!openIds.has(node.id)) {
+      nodes.push(node);
+      continue;
+    }
+    nodes.push(frameOf(node, node.id));
+    const system = open.find((s) => s.id === node.id);
+    inline(system.diagram, `${node.id}.`, node, expanded, nodes, edges, useCases);
   }
-  return { nodes, flows: flowsOf(diagram, diagram.traffic ?? []) };
+  for (const edge of diagram.edges) edges.push(rerouteEdge(edge, route));
+  return { ...diagram, nodes, edges, useCases: [...diagram.useCases.map((u) => rerouteUseCase(u, route)), ...useCases] };
+}
+function systemAt(diagram, path) {
+  const [head, ...rest] = path.split(".");
+  const system = diagram.systems?.find((s) => s.id === head);
+  if (!system || rest.length === 0) return system;
+  return system.diagram ? systemAt(system.diagram, rest.join(".")) : void 0;
+}
+var frameOf = (node, id) => ({ ...node, id, kind: "group", type: "group", techStack: FRAME_TECH, system: id });
+function inline(team, prefix, owner, expanded, nodes, edges, useCases) {
+  const ownerId = prefix.slice(0, -1);
+  const route = entryRouter(team, expanded, prefix);
+  for (const node of team.nodes) {
+    const id = prefix + node.id;
+    const parent = node.parent !== void 0 ? prefix + node.parent : ownerId;
+    const system = team.systems?.find((s) => s.id === node.id);
+    if (system?.diagram && expanded.has(id)) {
+      nodes.push({ ...frameOf(node, id), parent });
+      inline(system.diagram, `${id}.`, node, expanded, nodes, edges, useCases);
+    } else {
+      const { position: _position, ...rest } = node;
+      void _position;
+      nodes.push({ ...rest, id, parent, system: ownerId });
+    }
+  }
+  for (const edge of team.edges) edges.push(rerouteEdge({ ...edge, id: prefix + edge.id, source: prefix + edge.source, target: prefix + edge.target }, route));
+  for (const u of team.useCases) {
+    const named = { ...u, id: prefix + u.id, name: `${owner.name}: ${u.name}`, entryServiceId: u.entryServiceId !== void 0 ? prefix + u.entryServiceId : void 0 };
+    useCases.push(rerouteUseCase(prefixUseCase(named, prefix), route));
+  }
+}
+function prefixUseCase(u, prefix) {
+  const step = (s) => ({ ...s, ...s.id !== void 0 ? { id: prefix + s.id } : {}, fromServiceId: prefix + s.fromServiceId, toServiceId: prefix + s.toServiceId });
+  const scenarios = u.scenarios.map((sc) => ({ ...sc, steps: sc.steps.map(step) }));
+  return { ...u, steps: scenarios[0]?.steps ?? [], scenarios };
+}
+function entryRouter(diagram, expanded, prefix) {
+  const route = (id, port) => {
+    if (port === void 0 || !expanded.has(id)) return { id, port };
+    const local = id.slice(prefix.length);
+    const system = diagram.systems?.find((s) => s.id === local);
+    const entry = system?.entries.find((e) => e.id === port);
+    const team = system?.diagram;
+    const first = team?.useCases.find((u) => u.id === entry?.useCaseId)?.steps[0];
+    if (!team || !first) return { id };
+    const sender = team.nodes.find((n) => n.id === first.fromServiceId);
+    if (sender && kindOf(sender) !== "client") return { id: `${id}.${sender.id}` };
+    return entryRouter(team, expanded, `${id}.`)(`${id}.${first.toServiceId}`, first.toPort);
+  };
+  return route;
+}
+function rerouteEdge(edge, route) {
+  const { id: target, port } = route(edge.target, edge.targetPort);
+  if (target === edge.target && port === edge.targetPort) return edge;
+  const { targetPort: _targetPort, ...rest } = edge;
+  void _targetPort;
+  return { ...rest, target, ...port !== void 0 ? { targetPort: port } : {} };
+}
+function rerouteUseCase(u, route) {
+  let changed = false;
+  const step = (s) => {
+    const { id, port } = route(s.toServiceId, s.toPort);
+    if (id === s.toServiceId && port === s.toPort) return s;
+    changed = true;
+    const { toPort: _toPort, ...rest } = s;
+    void _toPort;
+    return { ...rest, toServiceId: id, ...port !== void 0 ? { toPort: port } : {} };
+  };
+  const scenarios = u.scenarios.map((sc) => ({ ...sc, steps: sc.steps.map(step) }));
+  return changed ? { ...u, steps: scenarios[0]?.steps ?? [], scenarios } : u;
+}
+
+// src/terminal/systems.ts
+function systemAt2(diagram, path) {
+  const [head, ...rest] = path.split(".");
+  const system = diagram.systems?.find((s) => s.id === head);
+  if (!system || rest.length === 0) return system;
+  return system.diagram ? systemAt2(system.diagram, rest.join(".")) : void 0;
+}
+function systemPaths(diagram, prefix = "") {
+  return (diagram.systems ?? []).flatMap((s) => [prefix + s.id, ...s.diagram ? systemPaths(s.diagram, `${prefix}${s.id}.`) : []]);
+}
+function viewError(diagram, view) {
+  const known = systemPaths(diagram);
+  const check = (id, what) => {
+    const system = systemAt2(diagram, id);
+    if (!system) return `No system '${id}' to ${what}; ${known.length ? `the systems are ${known.join(", ")}` : "the diagram has no systems"}.`;
+    if (!system.diagram) return `System '${id}' has no team design (from "\u2026") to ${what}.`;
+    return void 0;
+  };
+  for (const id of view.expanded ?? []) {
+    const error = check(id, "expand");
+    if (error) return error;
+  }
+  return view.focus !== void 0 ? check(view.focus, "focus") : void 0;
+}
+function viewOptions(view = {}) {
+  const expanded = /* @__PURE__ */ new Set();
+  for (const id of view.expanded ?? []) {
+    const parts = id.split(".");
+    for (let i = 1; i <= parts.length; i++) expanded.add(parts.slice(0, i).join("."));
+  }
+  return { expanded, ...view.focus !== void 0 ? { focus: view.focus } : {} };
+}
+function applyView(diagram, view = {}) {
+  return view.focus === void 0 && !view.expanded?.length ? diagram : viewDiagram(diagram, viewOptions(view));
+}
+var idList = (value) => value.split(",").map((s) => s.trim()).filter(Boolean);
+function viewOverlay(diagram, analysis, view = {}) {
+  const out = { nodes: {}, systems: {}, notes: [] };
+  const { expanded } = viewOptions(view);
+  let scope2 = diagram;
+  let scoped = analysis;
+  let load = analysis ? analysisOverlay(diagram, analysis) : void 0;
+  let path = "";
+  if (view.focus !== void 0 && systemAt2(diagram, view.focus)?.diagram) {
+    for (const id of view.focus.split(".")) {
+      const system = scope2.systems.find((s) => s.id === id);
+      const result = scoped?.systems?.find((s) => s.id === id);
+      if (path + id === view.focus) notesOf(scope2, scoped, system, result, path, out);
+      scoped = teamAnalysis(system, result);
+      load = teamLoad(system, result, scoped);
+      scope2 = system.diagram;
+      path += `${id}.`;
+    }
+  }
+  collect(scope2, scoped, load, "", path, expanded, out);
+  return out;
+}
+function teamAnalysis(system, result) {
+  return result?.analysis ?? (system.diagram ? contractOf(system).baseline : void 0);
+}
+function teamLoad(system, result, analysis) {
+  return result?.overlay ?? (analysis && system.diagram ? analysisOverlay(system.diagram, analysis) : void 0);
+}
+function collect(diagram, analysis, load, at, path, expanded, out) {
+  for (const [id, o] of Object.entries(load?.nodes ?? {})) out.nodes[at + id] = o;
+  for (const system of diagram.systems ?? []) {
+    const result = analysis?.systems?.find((s) => s.id === system.id);
+    out.systems[at + system.id] = badgeOf(diagram, system, result);
+    notesOf(diagram, analysis, system, result, path, out);
+    if (system.diagram && expanded.has(path + system.id)) {
+      const team = teamAnalysis(system, result);
+      collect(system.diagram, team, teamLoad(system, result, team), `${at}${system.id}.`, `${path}${system.id}.`, expanded, out);
+    }
+  }
+}
+function notesOf(diagram, analysis, system, result, path, out) {
+  const warnings = result?.warnings ?? [];
+  if (!analysis || warnings.length === 0) return;
+  const hint = runTests(diagram, analysis).find((t) => t.id === `system:${system.id}` && !t.passed)?.hint;
+  warnings.forEach((text, i) => out.notes.push({ system: path + system.id, text, ...hint && i === warnings.length - 1 ? { hint } : {} }));
+}
+function badgeOf(diagram, system, result) {
+  const contract = result?.contract ?? contractOf(system);
+  const latency2 = contract.entries.flatMap((e) => e.latency)[0];
+  const availability2 = contract.entries.map((e) => e.availabilityPercent).filter((a) => a !== void 0);
+  const promise = [latency2 ? `p${latency2.percentile} ${formatMs(latency2.maxMs)}` : "", availability2.length ? `${Math.min(...availability2)}%` : ""].filter(Boolean).join(" \xB7 ");
+  const team = diagram.nodes.find((n) => n.id === system.id)?.ownerTeam;
+  const status = contract.source === "none" ? "idle" : result?.saturated ? "saturated" : result?.breaches.length ? "breach" : result?.hot ? "hot" : "ok";
+  return {
+    ...team ? { team } : {},
+    ...promise ? { promise } : {},
+    sentRps: result?.totalInboundRps ?? 0,
+    headroomRps: Math.min(Infinity, ...contract.entries.map((e) => e.saturatesAtRps)),
+    ...result && contract.source !== "none" ? { utilization: result.utilization } : {},
+    status
+  };
+}
+function loadText(badge) {
+  const head = formatRps(badge.headroomRps);
+  return `${formatRps(badge.sentRps).replace(/ rps$/, "")} / ${head}`;
 }
 
 // src/terminal/document.ts
@@ -4428,14 +5400,20 @@ function loadDocument(input) {
   const simulated = errors.length === 0 && (diagram.traffic?.length ?? 0) > 0;
   const analysis = simulated ? analyze(diagram) : void 0;
   const imports = input.imports && Object.keys(input.imports).length ? input.imports : void 0;
-  const sim = analysis ? analysisOverlay(diagram, analysis) : void 0;
-  if (sim) {
+  const view = errors.length ? {} : input.view ?? {};
+  const sim = errors.length ? void 0 : viewOverlay(diagram, analysis, view);
+  const top = view.focus === void 0;
+  if (sim && analysis && top) {
     for (const c of diagram.capacity ?? []) if (c.size && sim.nodes[c.node]) sim.nodes[c.node].size = c.size;
   }
+  const overlay = sim && Object.keys(sim.nodes).length ? sim.nodes : void 0;
   return {
-    diagram,
+    diagram: errors.length ? diagram : applyView(diagram, view),
+    root: diagram,
     errors,
-    ...sim ? { overlay: sim.nodes } : {},
+    ...overlay ? { overlay } : {},
+    systems: sim?.systems ?? {},
+    notes: sim?.notes ?? [],
     tests: analysis ? runTests(diagram, analysis) : [],
     link: (playback) => EDITOR + encodeShareHash(input.source, playback, imports)
   };
@@ -4448,20 +5426,85 @@ function missingImports(input) {
     path: input.path ?? "diagram.proschi",
     resolve: (importPath, fromPath) => {
       const found = known(importPath, fromPath);
-      if (!found) missing.add(joinImportPath(fromPath, importPath));
+      const key = joinImportPath(fromPath, importPath);
+      if (!found && key !== void 0) missing.add(key);
       return found;
     }
   });
   return [...missing];
 }
+function importFilePath(dir, root, key) {
+  if (isRemoteSpec(key) || key.startsWith("/")) return void 0;
+  const parts = dir.split("/").filter(Boolean);
+  for (const part of key.split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") parts.pop();
+    else parts.push(part);
+  }
+  const path = `/${parts.join("/")}`;
+  return path === root || path.startsWith(root.endsWith("/") ? root : `${root}/`) ? path : void 0;
+}
 function keyOf(input) {
-  const text = input.source + "\0" + JSON.stringify(input.imports ?? {});
+  const text = input.source + "\0" + JSON.stringify(input.imports ?? {}) + (input.view ? "\0" + JSON.stringify(input.view) : "");
   let h2 = 2166136261;
   for (let i = 0; i < text.length; i++) {
     h2 ^= text.charCodeAt(i);
     h2 = Math.imul(h2, 16777619);
   }
   return (h2 >>> 0).toString(36) + text.length.toString(36);
+}
+
+// src/lockFormat.ts
+var LOCK_FILE = "proschi.lock";
+var CACHE_DIR = ".proschi/cache";
+var HASH = /^[0-9a-f]{64}$/;
+var COMMIT = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+var emptyLock = () => ({ version: 1, git: {}, https: {} });
+var gitKey = (repo, ref) => `${repo}@${ref}`;
+var remoteError = {
+  noLock: (spec) => new ImportError(`'${spec}' is a remote import and there is no ${LOCK_FILE}; run proschi imports sync`),
+  notLocked: (spec) => new ImportError(`'${spec}' is not in ${LOCK_FILE}; run proschi imports sync`),
+  notCached: (spec) => new ImportError(`'${spec}' is not in the import cache (${CACHE_DIR}); run proschi imports sync`),
+  altered: (spec) => new ImportError(`The cached copy of '${spec}' does not match its hash in ${LOCK_FILE}; run proschi imports sync`)
+};
+var isRecord = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+function parseLock(text) {
+  const invalid = (why) => new ImportError(`Invalid ${LOCK_FILE}: ${why}; delete it and run proschi imports sync`);
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch (e) {
+    throw invalid(e.message);
+  }
+  if (!isRecord(json) || json.version !== 1) throw invalid('expected {"version": 1, \u2026}');
+  const lock = emptyLock();
+  const git = json.git ?? {};
+  const https = json.https ?? {};
+  if (!isRecord(git) || !isRecord(https)) throw invalid('"git" and "https" must be objects');
+  for (const [key, entry] of Object.entries(git)) {
+    const at = key.lastIndexOf("@");
+    const valid = at > 0 && isRecord(entry) && typeof entry.commit === "string" && COMMIT.test(entry.commit) && isRecord(entry.files) && Object.entries(entry.files).every(([path, hash]) => typeof hash === "string" && HASH.test(hash) && isGitSpec(`git:${key.slice(0, at)}//${path}@${key.slice(at + 1)}`));
+    if (!valid) throw invalid(`bad git entry '${key}'`);
+    lock.git[key] = { commit: entry.commit, files: { ...entry.files } };
+  }
+  for (const [url, hash] of Object.entries(https)) {
+    if (typeof hash !== "string" || !HASH.test(hash) || parseRemoteSpec(url)?.kind !== "https") throw invalid(`bad https entry '${url}'`);
+    lock.https[url] = hash;
+  }
+  return lock;
+}
+function isGitSpec(spec) {
+  try {
+    return parseRemoteSpec(spec)?.kind === "git";
+  } catch {
+    return false;
+  }
+}
+function lockedHash(lock, spec) {
+  const remote = parseRemoteSpec(spec);
+  if (remote?.kind === "git") return lock.git[gitKey(remote.repo, remote.ref)]?.files[remote.path];
+  if (remote?.kind === "https") return lock.https[remote.url];
+  return void 0;
 }
 
 // src/terminal/grid.ts
@@ -4759,6 +5802,7 @@ var SY = 12;
 var MAX_SX = 16;
 var SQUEEZE_SX = 20;
 var MARGIN = 1;
+var SYSTEM_ROWS = 6;
 function buildScene(diagram, layout, maxColumns = 160) {
   const widthPx = layoutWidth(diagram, layout);
   let sx = Math.min(MAX_SX, Math.max(SX, widthPx / Math.max(1, maxColumns - 2 * MARGIN - 1)));
@@ -4801,7 +5845,7 @@ function sceneAt(diagram, layout, sx) {
     const x = cx(at.x);
     const y = cy(at.y);
     const w = Math.max(node.kind === "group" ? 8 : 6, cx(at.x + box.width) - x);
-    const h2 = node.kind === "component" ? 5 : Math.max(node.kind === "group" ? 3 : 4, cy(at.y + box.height) - y);
+    const h2 = node.kind === "component" ? 5 : node.kind === "system" ? SYSTEM_ROWS : Math.max(node.kind === "group" ? 3 : 4, cy(at.y + box.height) - y);
     nodes.set(node.id, { node, rect: { x, y, w, h: h2 }, depth: depthOf(node) });
   }
   const edges = [];
@@ -4887,9 +5931,19 @@ function unjog(pts, box) {
   if (!sideways || a.x < box.x + 1 || a.x > box.x + box.w - 2) return pts;
   return [...pts.slice(0, n - 2), { x: a.x, y: c.y }];
 }
+function undetour(pts) {
+  const out = pts.slice();
+  for (let i = 0; i + 3 < out.length; i++) {
+    const [a, b, c, d] = out.slice(i, i + 4);
+    const down = a.y === b.y && b.x === c.x && c.y === d.y && a.x === d.x && Math.abs(b.x - a.x) <= 6 && Math.abs(c.y - b.y) <= 4;
+    const across = a.x === b.x && b.y === c.y && c.x === d.x && a.y === d.y && Math.abs(b.y - a.y) <= 3 && Math.abs(c.x - b.x) <= 8;
+    if (down || across) out.splice(i + 1, 2);
+  }
+  return out;
+}
 function routePath(points, from, to) {
   if (points.length < 2) return void 0;
-  const pts = unjog(unjog(points.slice(), to).reverse(), from).reverse();
+  const pts = unjog(unjog(undetour(points), to).reverse(), from).reverse();
   pts[0] = attach(pts[0], pts[1], from);
   pts[pts.length - 1] = attach(pts[pts.length - 1], pts[pts.length - 2], to);
   const all = [pts[0]];
@@ -5047,7 +6101,8 @@ function paint(scene, options = {}) {
   const grid = new Grid(scene.columns, scene.rows);
   const { play } = options;
   const all = [...scene.nodes.values()];
-  for (const g of all.filter((n) => n.node.kind === "group").sort((a, b) => a.depth - b.depth)) drawGroup(grid, g, play ? "path" : void 0);
+  const frameOf2 = (n) => isFrame(n.node) ? { badge: options.systems?.[n.node.id], selected: options.selected === n.node.id } : void 0;
+  for (const g of all.filter((n) => n.node.kind === "group").sort((a, b) => a.depth - b.depth)) drawGroup(grid, g, play ? "path" : void 0, frameOf2(g));
   for (const n of all) drawStack(grid, scene, n, options.overlay?.[n.node.id], lookOf(play, n.node.id));
   for (const { edge, path } of scene.edges) {
     const own = edge.style?.color ? hex(edge.style.color) : COLOR.line;
@@ -5080,13 +6135,14 @@ function paint(scene, options = {}) {
       if (!onCard(scene, x + i, y)) grid.set(x + i, y, text[i], color);
     }
   }
-  for (const g of all) if (g.node.kind === "group") drawGroupHeading(grid, g, play ? "path" : void 0);
+  for (const g of all) if (g.node.kind === "group") drawGroupHeading(grid, g, play ? "path" : void 0, frameOf2(g));
   for (const n of all) drawStackCount(grid, scene, n, options.overlay?.[n.node.id], lookOf(play, n.node.id));
   for (const packet of play?.packets ?? []) grid.set(packet.at.x, packet.at.y, packet.cut ? "\u2717" : "\u25A0", packet.error ? COLOR.fail : COLOR.pink);
   for (const n of all) {
     if (n.node.kind === "group") continue;
     const look = lookOf(play, n.node.id);
     if (n.node.kind === "text") drawNote(grid, n, look);
+    else if (n.node.kind === "system") drawSystem(grid, n, options.systems?.[n.node.id], look, options.selected === n.node.id);
     else drawCard(grid, scene, n, options.overlay?.[n.node.id], look, options.icons ?? "nerd-font");
   }
   drawLegend(grid, scene);
@@ -5147,14 +6203,84 @@ function fill(grid, r, fg, bg) {
   for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) grid.set(x, y, " ", fg, bg);
 }
 var fit = (text, room) => text.length <= room ? text : room <= 1 ? "\u2026".slice(0, room) : text.slice(0, room - 1) + "\u2026";
-function drawGroup(grid, { node, rect }, look) {
+var isFrame = (node) => node.kind === "group" && node.system === node.id;
+function statusColor(status, ok) {
+  if (status === "saturated" || status === "breach") return COLOR.fail;
+  if (status === "hot") return COLOR.warn;
+  return status === "idle" ? COLOR.muted : ok;
+}
+var STATUS = { ok: "\u2713 ok", hot: "\u25B2 hot", saturated: "\u2717 saturated", breach: "\u2717 breaks SLA", idle: "not simulated" };
+function doubleFrame(grid, r, color) {
+  const right = r.x + r.w - 1;
+  const bottom = r.y + r.h - 1;
+  for (let x = r.x + 1; x < right; x++) {
+    grid.set(x, r.y, "\u2550", color);
+    grid.set(x, bottom, "\u2550", color);
+  }
+  for (let y = r.y + 1; y < bottom; y++) {
+    grid.set(r.x, y, "\u2551", color);
+    grid.set(right, y, "\u2551", color);
+  }
+  grid.set(r.x, r.y, "\u2554", color);
+  grid.set(right, r.y, "\u2557", color);
+  grid.set(r.x, bottom, "\u255A", color);
+  grid.set(right, bottom, "\u255D", color);
+}
+function drawGroup(grid, { node, rect }, look, system) {
+  if (system) return doubleFrame(grid, rect, system.selected ? COLOR.pink : fade(look, statusColor(system.badge?.status, baseColor(node, COLOR.muted))));
   frame(grid, rect, fade(look, baseColor(node, COLOR.muted)), node.style?.dash ?? "dashed");
 }
-function drawGroupHeading(grid, { node, rect }, look) {
-  const color = fade(look, baseColor(node, COLOR.muted));
-  grid.text(rect.x + 2, rect.y, ` ${fit(node.name.toUpperCase(), rect.w - 6)} `, COLOR.onColor, Infinity, color);
+function drawGroupHeading(grid, { node, rect }, look, system) {
+  const color = system ? system.selected ? COLOR.pink : fade(look, statusColor(system.badge?.status, baseColor(node, COLOR.muted))) : fade(look, baseColor(node, COLOR.muted));
+  const name = node.name.toUpperCase();
+  const badge = system?.badge;
+  const room = rect.w - 5;
+  let about = "";
+  if (badge) {
+    let parts = [STATUS[badge.status], badge.team ? `@${badge.team}` : "", badge.promise ?? "", loadText(badge)];
+    const width = () => name.length + 2 + parts.filter(Boolean).join(" \xB7 ").length;
+    for (const drop of [3, 2, 1]) if (width() > room) parts = parts.map((p, i) => i === drop ? "" : p);
+    about = parts.filter(Boolean).join(" \xB7 ");
+  }
+  const chip2 = ` ${fit(name, badge ? Math.max(4, room - 2 - about.length) : rect.w - 6)} `;
+  grid.text(rect.x + 2, rect.y, chip2, COLOR.onColor, Infinity, color);
+  const rest = room - chip2.length;
+  if (about && rest > 4) grid.text(rect.x + 2 + chip2.length, rect.y, `${fit(about, rest)} `, look ? COLOR.fadedMore : color);
   if (!node.description || rect.h <= 3) return;
   grid.text(rect.x + 2, rect.y + 1, fit(node.description.replace(/\s+/g, " "), rect.w - 4), look ? COLOR.fadedMore : COLOR.muted);
+}
+function drawSystem(grid, { node, rect }, badge, look, selected) {
+  const accent = look === "failing" ? COLOR.fail : look === "lit" || selected ? COLOR.pink : void 0;
+  const status = badge?.status;
+  const color = accent ?? fade(look, statusColor(status, baseColor(node, COLOR.line)));
+  const heat = look || !badge || badge.utilization === void 0 ? void 0 : heatOf({ utilization: badge.utilization, saturated: status === "saturated" });
+  const ink = heat !== void 0 ? COLOR.onColor : look === "off" ? COLOR.fadedMore : DEFAULT;
+  const muted = heat !== void 0 ? COLOR.onColor : look === "off" ? COLOR.fadedMore : COLOR.muted;
+  fill(grid, rect, DEFAULT, DEFAULT);
+  if (heat !== void 0) fill(grid, { x: rect.x + 1, y: rect.y + 1, w: rect.w - 2, h: rect.h - 2 }, COLOR.onColor, heat);
+  doubleFrame(grid, rect, color);
+  const left = rect.x + 2;
+  const room = rect.w - 4;
+  if (status && rect.w > 14) {
+    const word = ` ${fit(STATUS[status], rect.w - 8)} `;
+    grid.text(rect.x + rect.w - 2 - word.length, rect.y, word, look ? muted : statusColor(status, COLOR.muted));
+  }
+  grid.text(left, rect.y + 1, fit(node.name, room), ink, Infinity, heat);
+  grid.text(left, rect.y + 2, fit(badge?.team ? `@${badge.team}` : "system", room), muted, Infinity, heat);
+  if (!badge) return;
+  grid.text(left, rect.y + 3, fit(badge.promise ? `promise ${badge.promise}` : "no promise", room), badge.promise ? ink : muted, Infinity, heat);
+  if (rect.h < 6) return;
+  const long = `${loadText(badge)} sent / headroom`;
+  const text = fit(long.length <= room ? long : loadText(badge), room);
+  grid.text(left, rect.y + 4, text, ink, Infinity, heat);
+  const bar = room - text.length - 1;
+  if (bar < 4 || !Number.isFinite(badge.headroomRps) || badge.headroomRps <= 0) return;
+  const share = badge.sentRps / badge.headroomRps;
+  const filled = Math.max(share > 0 ? 1 : 0, Math.min(bar, Math.round(share * bar)));
+  for (let i = 0; i < bar; i++) {
+    const full = i < filled;
+    grid.set(left + text.length + 1 + i, rect.y + 4, full ? "\u2501" : "\u2500", heat !== void 0 ? COLOR.onColor : full ? ink : COLOR.muted, heat);
+  }
 }
 var TILE = { w: 5, h: 3 };
 function heatOf(overlay) {
@@ -5365,12 +6491,13 @@ function groupByEndpoint(useCases) {
 var icons = "nerd-font";
 var PANE = "proschi-view";
 var PANE_VIEW = `${PANE}:0`;
-var IDLE = { pick: "", step: 0, isPlaying: false, mode: "diagram", explorer: false };
+var IDLE = { pick: "", step: 0, isPlaying: false, mode: "diagram", explorer: false, expanded: [] };
 var NO_SOURCE = { source: "" };
 var paneFile = atom({ plugin: "proschi", key: "paneFile" }, "");
 var paneSource = atom({ plugin: "proschi", key: "paneSource" }, NO_SOURCE);
 var players = atom({ plugin: "proschi", key: "player" }, IDLE);
 var PANE_KEYS = "p play \xB7 n/b step \xB7 r restart \xB7 e end \xB7 x explorer \xB7 d diagram \xB7 esc back to the prompt";
+var SYSTEM_KEYS = "s next system \xB7 o open/close \xB7 f focus in \xB7 u back out";
 var FRAME2 = 50;
 var HINT = [
   "Proschi diagrams render in this terminal: put a Proschi document in a ```proschi fenced block",
@@ -5388,7 +6515,7 @@ function register(on, options) {
   const chosen = options.icons;
   icons = chosen === "symbols" || chosen === "none" ? chosen : "nerd-font";
   on("session.start", async ($, e, next) => {
-    await $.command.register({ name: "proschi", description: "Proschi diagrams: /proschi view <file.proschi> shows one in a pane", argumentHint: "view <file>" });
+    await $.command.register({ name: "proschi", description: "Proschi diagrams: /proschi view <file.proschi> shows one in a pane", argumentHint: "view [--expand <id>,\u2026] [--focus <id>] <file>" });
     return next(e);
   });
   on("prompt.compose", async ($, e, next) => {
@@ -5397,11 +6524,26 @@ function register(on, options) {
   });
   on("command.run", { command: "proschi" }, async ($, e) => {
     const [verb, ...rest] = e.args.trim().split(/\s+/);
-    const file = rest.join(" ");
-    if (verb !== "view" || !file) return { text: "Usage: /proschi view <file.proschi>" };
+    const words = [];
+    const view = {};
+    for (let i = 0; i < rest.length; i++) {
+      if (rest[i] === "--expand" || rest[i] === "--focus") {
+        const value = rest[++i];
+        if (!value || idList(value).length === 0) return { text: `Missing system id after ${rest[i - 1]}` };
+        if (rest[i - 1] === "--expand") view.expanded = [...view.expanded ?? [], ...idList(value)];
+        else view.focus = value;
+      } else words.push(rest[i]);
+    }
+    const file = words.join(" ");
+    if (verb !== "view" || !file) return { text: USAGE };
     if (!await $.fs.exists(file)) return { text: `No such file: ${file}` };
+    if (view.expanded || view.focus !== void 0) {
+      const { diagram, errors } = parseSource(await readWithImports($, file));
+      const refused = errors.length ? void 0 : viewError(diagram, view);
+      if (refused) return { text: refused };
+    }
     stop(PANE_VIEW);
-    await update($, memberOf(players, { requestId: PANE_VIEW }), () => IDLE);
+    await update($, memberOf(players, { requestId: PANE_VIEW }), () => ({ ...IDLE, expanded: view.expanded ?? [], ...view.focus !== void 0 ? { focus: view.focus } : {} }));
     await update($, paneFile, () => file);
     await $.ui.open({ id: PANE, title: `Proschi \xB7 ${basename(file)}` });
     watch($, file);
@@ -5458,7 +6600,7 @@ function register(on, options) {
     const view = await diagramView($, { ui, requestId: PANE, columns }, PANE_VIEW, source);
     if ("error" in view) return /* @__PURE__ */ h(ui.Text, { color: "red" }, view.error);
     const isFocused = "isFocused" in e.props && e.props.isFocused === true;
-    return /* @__PURE__ */ h(ui.Box, { flexDirection: "column" }, view.element, /* @__PURE__ */ h(ui.Text, { dimColor: true, wrap: "truncate-end" }, isFocused ? PANE_KEYS : "ctrl+x tab focuses the pane for its keys"));
+    return /* @__PURE__ */ h(ui.Box, { flexDirection: "column" }, view.element, /* @__PURE__ */ h(ui.Text, { dimColor: true, wrap: "truncate-end" }, isFocused ? PANE_KEYS : "ctrl+x tab focuses the pane for its keys"), isFocused && view.systems && /* @__PURE__ */ h(ui.Text, { dimColor: true, wrap: "truncate-end" }, SYSTEM_KEYS));
   });
 }
 function proschiFile(tool, input) {
@@ -5466,21 +6608,56 @@ function proschiFile(tool, input) {
   const path = input?.file_path;
   return typeof path === "string" && path.endsWith(".proschi") ? path : void 0;
 }
+var USAGE = "Usage: /proschi view [--expand <system>[,<system>\u2026]] [--focus <system>] <file.proschi>";
 var basename = (path) => path.split("/").pop() ?? path;
 var dirname = (path) => path.slice(0, Math.max(0, path.lastIndexOf("/")));
+async function projectRoot($, dir) {
+  for (let current = dir; ; current = dirname(current)) {
+    if (await $.fs.exists(`${current}/proschi.json`) || await $.fs.exists(`${current}/.git`)) return current || "/";
+    if (!current || current === "/") return dir;
+  }
+}
+var importReasons = /* @__PURE__ */ new Map();
 async function readWithImports($, file) {
   const name = basename(file);
   const dir = dirname(file);
+  const root = await projectRoot($, dir);
   const doc = { source: await $.fs.read(file), path: name, imports: {} };
+  const lock = {};
   for (let round2 = 0; round2 < 8; round2++) {
     const missing = missingImports(doc).filter((key) => key !== name && !(key in doc.imports));
     if (missing.length === 0) break;
     for (const key of missing) {
-      const path = dir ? `${dir}/${key}` : key;
-      doc.imports[key] = await $.fs.exists(path) ? await $.fs.read(path) : "";
+      importReasons.delete(key);
+      if (isRemoteSpec(key)) {
+        doc.imports[key] = await readRemote($, root, key, lock.read ??= readLock($, root)).catch((error) => {
+          importReasons.set(key, error instanceof Error ? error.message : String(error));
+          return "";
+        });
+        continue;
+      }
+      const path = importFilePath(dir, root, key);
+      doc.imports[key] = path && await $.fs.exists(path) ? await $.fs.read(path) : "";
     }
   }
   return doc;
+}
+async function readLock($, root) {
+  const file = `${root}/${LOCK_FILE}`;
+  return await $.fs.exists(file) ? parseLock(await $.fs.read(file)) : void 0;
+}
+async function readRemote($, root, spec, locked) {
+  const lock = await locked;
+  if (!lock) throw remoteError.noLock(spec);
+  const hash = lockedHash(lock, spec);
+  if (!hash) throw remoteError.notLocked(spec);
+  const file = `${root}/${CACHE_DIR}/${hash}`;
+  if (!await $.fs.exists(file)) throw remoteError.notCached(spec);
+  const { base64: base642 } = await $.fs.read(file, { as: "bytes" });
+  const bytes = Uint8Array.from(atob(base642), (c) => c.charCodeAt(0));
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  if ([...digest].map((b) => b.toString(16).padStart(2, "0")).join("") !== hash) throw remoteError.altered(spec);
+  return new TextDecoder().decode(bytes);
 }
 function watch($, file) {
   stop(PANE);
@@ -5518,7 +6695,10 @@ function normal(p) {
     step: typeof p?.step === "number" ? p.step : 0,
     isPlaying: p?.isPlaying === true && p.mode === "play",
     mode: p?.mode === "play" ? "play" : "diagram",
-    explorer: p?.explorer === true
+    explorer: p?.explorer === true,
+    expanded: Array.isArray(p?.expanded) ? p.expanded.filter((id) => typeof id === "string") : [],
+    ...typeof p?.focus === "string" ? { focus: p.focus } : {},
+    ...typeof p?.selected === "string" ? { selected: p.selected } : {}
   };
 }
 var PINK = "#ff5da2";
@@ -5527,8 +6707,11 @@ var YELLOW = "#ffd23f";
 var PAUSE = "\u275A\u275A Pause";
 var PLAY = " \u25B6 Play ";
 var BARS_WIDTH = 80;
-async function diagramView($, d, viewId, source, file) {
+async function diagramView($, d, viewId, written, file) {
   const { ui } = d;
+  const player = normal(await read($, memberOf(players, { requestId: viewId })));
+  const shown = { ...player.expanded.length ? { expanded: player.expanded } : {}, ...player.focus !== void 0 ? { focus: player.focus } : {} };
+  const source = shown.expanded || shown.focus !== void 0 ? { ...written, view: shown } : written;
   const key = keyOf(source);
   let doc = documents.get(key);
   if (!doc) {
@@ -5544,7 +6727,7 @@ async function diagramView($, d, viewId, source, file) {
   const layout = layouts.get(key);
   if (!layout) {
     requestLayout($, key, source);
-    return { element: /* @__PURE__ */ h(ui.Text, { dimColor: true }, "Laying out ", doc.diagram.title ?? "the diagram", "\u2026") };
+    return { element: /* @__PURE__ */ h(ui.Text, { dimColor: true }, "Laying out ", doc.diagram.title ?? "the diagram", "\u2026"), systems: false };
   }
   if ("error" in layout) return { error: `Proschi could not lay ${file ?? "this diagram"} out: ${layout.error}` };
   const columns = Math.max(40, Math.min(512, d.columns));
@@ -5555,20 +6738,60 @@ async function diagramView($, d, viewId, source, file) {
     scenes.set(sceneKey, scene);
   }
   const picks = doc.diagram.useCases.flatMap((u) => u.scenarios.map((s) => pickOf(u, s)));
-  const player = normal(await read($, memberOf(players, { requestId: viewId })));
   const pick = picks.find((p) => p.value === player.pick) ?? picks[0];
   const playing = player.mode === "play" ? pick : void 0;
   const steps = playing?.scenario.steps ?? [];
   const step = Math.max(0, Math.min(player.step, steps.length - 1));
   const width = Math.min(Math.max(40, d.columns), Math.max(scene.columns, BARS_WIDTH));
-  const view = { d, viewId, rasterKey: `d-${viewId}`, anchorKey: `at-${viewId}`, scene, width, overlay: doc.overlay, inPane: d.requestId === PANE };
+  const systems = selectable(scene, player.focus);
+  const selected = systems.find((s) => s.path === player.selected) ?? systems[0];
+  const view = { d, viewId, rasterKey: `d-${viewId}`, anchorKey: `at-${viewId}`, scene, width, overlay: doc.overlay, systems: doc.systems, ...selected ? { selected: selected.id } : {}, inPane: d.requestId === PANE };
   if (playing && player.isPlaying && !timers.has(viewId)) animate($, view, steps);
   const progress = timers.has(viewId) ? 0 : 100;
-  const grid = paint(scene, { overlay: doc.overlay, icons, ...steps.length > 0 ? { play: playAt(scene, steps, step, progress) } : {} });
+  const grid = paint(scene, { overlay: doc.overlay, icons, systems: doc.systems, ...view.selected ? { selected: view.selected } : {}, ...steps.length > 0 ? { play: playAt(scene, steps, step, progress) } : {} });
   const link = doc.link(playing ? { useCase: playing.useCase.id, ...playing.useCase.scenarios.length > 1 ? { scenario: playing.scenario.id } : {}, step } : void 0);
-  const lost = lostImports(source, key);
+  const lost = lostImports(written, keyOf(written));
+  const hasSystems = systems.length > 0 || player.focus !== void 0;
   const roomy = view.width >= 79;
-  return { element: /* @__PURE__ */ h(ui.Box, { flexDirection: "column" }, playing ? playerHeader($, view, playing, player) : doc.diagram.title && /* @__PURE__ */ h(ui.Box, { flexDirection: "column" }, /* @__PURE__ */ h(ui.Text, { bold: true }, doc.diagram.title), doc.diagram.summary && /* @__PURE__ */ h(ui.Text, { dimColor: true }, doc.diagram.summary)), /* @__PURE__ */ h(ui.Box, { key: view.anchorKey, flexDirection: "column" }, grid.columns > d.columns && /* @__PURE__ */ h(ui.Text, { dimColor: true, wrap: "truncate-end" }, "\u2194 ", grid.columns, " columns wide, wider than the ", d.columns, " here: ", view.inPane ? "widen the window" : "use \u26F6 Focus or a wider window", " to see it whole."), lost.length > 0 && /* @__PURE__ */ h(ui.Text, { dimColor: true, wrap: "truncate-end" }, "\u26A0 Not found, so drawn as plain boxes: ", lost.join(", ")), /* @__PURE__ */ h(ui.Raster, { key: view.rasterKey, columns: grid.columns, rows: grid.rows, cells: grid.toBase64() })), playing ? stepPanel($, view, playing, step, player) : pick && useCaseBar($, view, doc, pick, player), /* @__PURE__ */ h(ui.Box, { flexDirection: "row", gap: 1, borderStyle: "round", borderColor: "gray", paddingX: 1, width: view.width }, /* @__PURE__ */ h(ui.Button, { key: `src-${viewId}`, label: roomy ? "\u29C9 Copy source" : "\u29C9 Source", onPress: (press) => void copy($, press.surface, source.source, "the Proschi source") }), /* @__PURE__ */ h(ui.Button, { key: `lnk-${viewId}`, label: roomy ? "\u29C9 Copy share link" : "\u29C9 Link", onPress: (press) => void copy($, press.surface, link, "the share link") }), /* @__PURE__ */ h(ui.Button, { key: `open-${viewId}`, label: roomy ? "\u2197 Open in Proschi" : "\u2197 Open", variant: "primary", onPress: (press) => void openLink($, press.surface, link) }), !view.inPane && /* @__PURE__ */ h(ui.Button, { key: `focus-${viewId}`, label: "\u26F6 Focus", onPress: () => focus($, view, file ? basename(file) : doc.diagram.title ?? "diagram", file ? { file } : { source }) }))) };
+  return { element: /* @__PURE__ */ h(ui.Box, { flexDirection: "column" }, playing ? playerHeader($, view, playing, player) : doc.diagram.title && /* @__PURE__ */ h(ui.Box, { flexDirection: "column" }, /* @__PURE__ */ h(ui.Text, { bold: true }, doc.diagram.title), doc.diagram.summary && /* @__PURE__ */ h(ui.Text, { dimColor: true }, doc.diagram.summary)), /* @__PURE__ */ h(ui.Box, { key: view.anchorKey, flexDirection: "column" }, grid.columns > d.columns && /* @__PURE__ */ h(ui.Text, { dimColor: true, wrap: "truncate-end" }, "\u2194 ", grid.columns, " columns wide, wider than the ", d.columns, " here: ", view.inPane ? "widen the window" : "use \u26F6 Focus or a wider window", " to see it whole."), lost.some((name) => !importReasons.has(name)) && /* @__PURE__ */ h(ui.Text, { dimColor: true, wrap: "truncate-end" }, "\u26A0 Not found, so drawn as plain boxes: ", lost.filter((name) => !importReasons.has(name)).join(", ")), lost.filter((name) => importReasons.has(name)).map((name) => /* @__PURE__ */ h(ui.Text, { key: `lost-${name}`, dimColor: true }, "\u26A0 ", importReasons.get(name))), doc.notes.map((note) => /* @__PURE__ */ h(ui.Text, { color: "yellow" }, "\u26A0 ", note.text, note.hint && /* @__PURE__ */ h(ui.Text, { dimColor: true }, " \u2192 ", note.hint))), /* @__PURE__ */ h(ui.Raster, { key: view.rasterKey, columns: grid.columns, rows: grid.rows, cells: grid.toBase64() })), hasSystems && !playing && systemBar($, view, doc, systems, selected, player), playing ? stepPanel($, view, playing, step, player) : pick && useCaseBar($, view, doc, pick, player), /* @__PURE__ */ h(ui.Box, { flexDirection: "row", gap: 1, borderStyle: "round", borderColor: "gray", paddingX: 1, width: view.width }, /* @__PURE__ */ h(ui.Button, { key: `src-${viewId}`, label: roomy ? "\u29C9 Copy source" : "\u29C9 Source", onPress: (press) => void copy($, press.surface, source.source, "the Proschi source") }), /* @__PURE__ */ h(ui.Button, { key: `lnk-${viewId}`, label: roomy ? "\u29C9 Copy share link" : "\u29C9 Link", onPress: (press) => void copy($, press.surface, link, "the share link") }), /* @__PURE__ */ h(ui.Button, { key: `open-${viewId}`, label: roomy ? "\u2197 Open in Proschi" : "\u2197 Open", variant: "primary", onPress: (press) => void openLink($, press.surface, link) }), !view.inPane && /* @__PURE__ */ h(ui.Button, { key: `focus-${viewId}`, label: "\u26F6 Focus", onPress: () => focus($, view, file ? basename(file) : doc.diagram.title ?? "diagram", file ? { file } : { source }) }))), systems: hasSystems };
+}
+function selectable(scene, focus2) {
+  return [...scene.nodes.values()].map((n) => n.node).filter((n) => n.kind === "system" || n.kind === "group" && n.system === n.id).map((n) => ({ id: n.id, path: focus2 !== void 0 ? `${focus2}.${n.id}` : n.id, name: n.name, expanded: n.kind === "group" }));
+}
+function systemBar($, view, doc, systems, selected, player) {
+  const { ui } = view.d;
+  const design = selected !== void 0 && !!systemAt2(doc.root, selected.path)?.diagram;
+  const next = () => {
+    const at = systems.findIndex((s) => s.path === selected?.path);
+    const to = systems[(at + 1) % systems.length];
+    if (to) void setPlayer($, view, (p) => ({ ...p, selected: to.path }));
+  };
+  const toggle2 = () => {
+    if (!selected || !design) return;
+    const open2 = player.expanded.includes(selected.path) || selected.expanded;
+    void setPlayer($, view, (p) => ({
+      ...p,
+      // Closing a system closes the ones inside it too.
+      expanded: open2 ? p.expanded.filter((id) => id !== selected.path && !id.startsWith(`${selected.path}.`)) : [...p.expanded, selected.path],
+      selected: selected.path
+    }));
+  };
+  const enter = () => {
+    if (!selected || !design) return;
+    void setPlayer($, view, (p) => ({ ...p, focus: selected.path, selected: void 0, pick: "", mode: "diagram", isPlaying: false }));
+  };
+  const leave = () => {
+    const focus2 = player.focus;
+    if (focus2 === void 0) return;
+    const up = focus2.includes(".") ? focus2.slice(0, focus2.lastIndexOf(".")) : void 0;
+    void setPlayer($, view, (p) => {
+      const { focus: _focus, ...rest } = p;
+      void _focus;
+      return { ...rest, ...up !== void 0 ? { focus: up } : {}, selected: focus2, pick: "", mode: "diagram", isPlaying: false };
+    });
+  };
+  const open = selected !== void 0 && (selected.expanded || player.expanded.includes(selected.path));
+  return /* @__PURE__ */ h(ui.Box, { flexDirection: "column", borderStyle: "round", borderColor: "gray", paddingX: 1, width: view.width }, player.focus !== void 0 && /* @__PURE__ */ h(ui.Text, { dimColor: true, wrap: "truncate-end" }, "Inside ", player.focus.split(".").join(" \u203A "), " \xB7 ", doc.diagram.title ?? "its design"), /* @__PURE__ */ h(ui.Box, { flexDirection: "row", gap: 1, alignItems: "center", flexWrap: "wrap" }, /* @__PURE__ */ h(ui.Text, { bold: true }, "System"), /* @__PURE__ */ h(ui.Text, { color: PINK, wrap: "truncate-end" }, selected ? `${selected.name} (${selected.path})` : "none here"), systems.length > 1 && /* @__PURE__ */ h(ui.Button, { key: `sys-next-${view.viewId}`, label: "\u21E5 Next", ...hotkey(view, "s"), onPress: next }), selected && design && /* @__PURE__ */ h(ui.Button, { key: `sys-open-${view.viewId}`, label: open ? "\u229F Collapse" : "\u229E Expand", ...hotkey(view, "o"), onPress: toggle2 }), selected && design && /* @__PURE__ */ h(ui.Button, { key: `sys-focus-${view.viewId}`, label: "\u2922 Focus in", ...hotkey(view, "f"), onPress: enter }), player.focus !== void 0 && /* @__PURE__ */ h(ui.Button, { key: `sys-back-${view.viewId}`, label: "\u2191 Back out", ...hotkey(view, "u"), onPress: leave })));
 }
 var lostByKey = /* @__PURE__ */ new Map();
 function lostImports(source, key) {
@@ -5767,7 +6990,7 @@ function animate($, view, steps) {
     if (started < 0) started = now;
     const elapsed = now - started;
     const play = playAt(view.scene, steps, step, Math.min(100, elapsed / TRAVEL_MS * 100), tick++);
-    await $.ui.blit({ requestId: view.d.requestId, key: view.rasterKey, cells: paint(view.scene, { overlay: view.overlay, icons, play }).toBase64() });
+    await $.ui.blit({ requestId: view.d.requestId, key: view.rasterKey, cells: paint(view.scene, { overlay: view.overlay, icons, systems: view.systems, ...view.selected ? { selected: view.selected } : {}, play }).toBase64() });
     if (!player.isPlaying) {
       if (elapsed >= TRAVEL_MS) stop(view.viewId);
       return;

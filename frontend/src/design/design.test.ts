@@ -111,6 +111,12 @@ describe('shell', () => {
     expect(header).toMatch(/href="\.\.\/practice\/" aria-current="page"/);
   });
 
+  it('links to the blog in the bar and the phone menu, current on the blog', () => {
+    expect(header.match(/href="\.\.\/blog\/"/g)).toHaveLength(2);
+    const blog = renderShell('header', { base: '../', current: 'blog' });
+    expect(blog.match(/href="\.\.\/blog\/" aria-current="page"/g)).toHaveLength(2);
+  });
+
   it('has the hooks enhance.ts and the view transitions need', () => {
     expect(header).toContain('class="ps-header"');
     expect(header.match(/data-theme-toggle=""/g)).toHaveLength(1);

@@ -1,9 +1,21 @@
 /**
  * Where a diagram's use case player stands, as the editor's: the diagram or a
  * scenario playing (`<useCase>:<scenario>`), which step, whether it plays, and
- * whether the use case explorer is open.
+ * whether the use case explorer is open. And which systems it draws open
+ * (`expanded`), which one it is focused into (`focus`), and which one the
+ * system keys act on (`selected`), each by its path from the root document
+ * (`orders`, `orders.warehouse`).
  */
-export type Player = { pick: string; step: number; isPlaying: boolean; mode: 'diagram' | 'play'; explorer: boolean }
+export type Player = {
+  pick: string
+  step: number
+  isPlaying: boolean
+  mode: 'diagram' | 'play'
+  explorer: boolean
+  expanded: string[]
+  focus?: string
+  selected?: string
+}
 
 /** A document the pane draws when it shows no file: a fenced block focused from a reply, with its imports. */
 export type PaneSource = { source: string; path?: string; imports?: Record<string, string> }

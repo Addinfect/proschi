@@ -1,0 +1,27 @@
+title "Orders"
+direction right
+gateway [AWS API Gateway] x2
+api [REST API] x3
+db [PostgreSQL] x2
+gateway -> api
+api -> db
+svc1 [Service] x2
+cache1 [Redis]
+api -> svc1
+svc1 -> cache1
+usecase "Place order" {
+  gateway -> api : POST /place-order
+  api -> db : INSERT row
+  api --> gateway : 201
+}
+usecase "Background" {
+  api -> svc1 : refresh
+  svc1 -> cache1 : GET key
+}
+traffic {
+  "Place order" 300 rps
+  "Background" 100 rps
+}
+requirements {
+  p99 "Place order" < 150ms
+}

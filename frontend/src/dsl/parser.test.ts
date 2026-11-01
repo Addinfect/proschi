@@ -512,3 +512,21 @@ describe('capacity size', () => {
     expect(parse('db\ncapacity {\n  db size XL\n}').diagnostics[0].message).toMatch(/Expected S, M or L after size/);
   });
 });
+
+describe('resolver errors', () => {
+  it("reports an ImportError's own message and falls back to Cannot find for others", () => {
+    const importError = Object.assign(new Error("'../x.proschi' is outside the project root"), { name: 'ImportError' });
+    const jailed = parse('import "../x.proschi"', {
+      resolve: () => {
+        throw importError;
+      },
+    });
+    expect(jailed.diagnostics).toEqual([{ severity: 'error', message: "'../x.proschi' is outside the project root", line: 1, col: 8, length: 14 }]);
+    const other = parse('import "x.proschi"', {
+      resolve: () => {
+        throw new TypeError('boom');
+      },
+    });
+    expect(other.diagnostics[0].message).toBe("Cannot find 'x.proschi'");
+  });
+});

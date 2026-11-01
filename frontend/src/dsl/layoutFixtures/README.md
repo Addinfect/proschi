@@ -49,7 +49,7 @@ order isn't top-down). That one is now opt-in as `layout ordered` (below).
 ## With layout hints
 
 `order-fulfillment-hinted.proschi` is the same diagram with the hints an
-author would add to steer it towards the reference (docs/LANGUAGE.md,
+author would add to steer it towards the reference (docs/STYLING.md,
 "Steering the layout"): `layout ordered`, `rank 0` on the third-party
 systems around the Order Fulfillment API, `rank 1` to `rank 4` on AWS
 region 1, region 2, the Kafka cluster and GCP, and `direction right` in the

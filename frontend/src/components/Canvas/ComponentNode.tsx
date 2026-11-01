@@ -6,7 +6,7 @@ import type { NodeProps } from 'reactflow';
 import type { ComponentMetadata } from '../../types/canvas';
 import { getTechStackIcon } from '../../utils/iconMapping';
 import { CANVAS_ACCENT } from '../../utils/canvasColors';
-import { heat } from '../../utils/heat';
+import { heat, heatText } from '../../utils/heat';
 import type { NodeOverlay } from '../../sim/overlay';
 import './canvas.css';
 
@@ -25,6 +25,7 @@ const ComponentNode = ({ data, selected }: NodeProps<ComponentMetadata>) => {
       className="pc-node"
       data-selected={selected || undefined}
       data-load={o ? (o.down ? 'down' : o.saturated ? 'over' : u !== undefined && u >= 0.9 ? 'hot' : 'ok') : undefined}
+      data-heat={o ? heatText(u, o.down) : undefined}
       data-stack={o?.replicas && o.replicas > 1 ? Math.min(2, o.replicas - 1) : undefined}
       // The load overlay wins over the node's colors while it is on (D4).
       style={o ? { background: heat(u, o.down) } : tintVars(data)}

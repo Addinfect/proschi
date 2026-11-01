@@ -7,6 +7,7 @@ import { practicePages } from './plugins/practicePages'
 import { cardPages } from './plugins/cardPages'
 import { siteShell } from './plugins/siteShell'
 import { docsSite } from './plugins/docsSite'
+import { blogSite } from './plugins/blogSite'
 import { sitemap } from './plugins/sitemap'
 
 // `ANALYZE=1 npx vite build` also writes dist/stats.html, a treemap of every chunk.
@@ -43,6 +44,12 @@ export default defineConfig(async () => ({
       docsDir: fileURLToPath(new URL('../docs', import.meta.url)),
       stubsDir: fileURLToPath(new URL('./docs', import.meta.url)),
     }),
+    // The release blog (blog/ at the repository root), in the docs' layout; also before siteShell.
+    blogSite({
+      blogDir: fileURLToPath(new URL('../blog', import.meta.url)),
+      docsDir: fileURLToPath(new URL('../docs', import.meta.url)),
+      stubsDir: fileURLToPath(new URL('./blog', import.meta.url)),
+    }),
     siteShell(),
     sitemap(fileURLToPath(new URL('../docs', import.meta.url)), fileURLToPath(new URL('./src/practice/problems', import.meta.url))),
     await analyzer(),
@@ -57,7 +64,7 @@ export default defineConfig(async () => ({
       // The landing page at the root, the editor under app/, system design
       // practice under practice/ (and a page per problem), model/, which forwards to the
       // docs, embed/ (a diagram for other sites' iframes), admin/ and 404.html.
-      // docsSite adds the docs pages (docs/**/index.html).
+      // docsSite adds the docs pages (docs/**/index.html), blogSite the blog's (blog/index.html and the post template).
       input: {
         landing: fileURLToPath(new URL('./index.html', import.meta.url)),
         app: fileURLToPath(new URL('./app/index.html', import.meta.url)),

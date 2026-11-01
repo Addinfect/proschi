@@ -15,6 +15,8 @@ export type { EdgeRoute, Point };
 const COMPONENT_SIZE = { width: 240, height: 60 };
 const COMPONENT_WITH_TEAM_SIZE = { width: 240, height: 84 };
 const TEXT_SIZE = { width: 240, height: 110 };
+/** A collapsed system box as the static renderers draw it (name, team, promise); the canvas draws a bigger card through `nodeSize`. */
+export const SYSTEM_SIZE = { width: 240, height: 100 };
 
 /** Edge labels: the canvas draws them in 11px JetBrains Mono on a padded chip. */
 const LABEL_CHAR_WIDTH = 6.7;
@@ -39,6 +41,8 @@ export interface LayoutOptions {
   ordered?: boolean;
   /** Raw ELK options over the defaults, for trying engine settings in the metrics harness. */
   elk?: Record<string, string>;
+  /** The size a renderer draws a node at, when it differs from the default card (e.g. the canvas's system boxes). */
+  nodeSize?: (node: DiagramNode) => { width: number; height: number } | undefined;
 }
 
 // ELK reads spacing from each container, so groups repeat it.
@@ -139,7 +143,7 @@ export async function layoutBoxes(diagram: Diagram, getElk: () => Promise<ElkIns
  * sensibly even when the architecture declares no edges. `getElk` picks the
  * ELK engine (default: bundled, on this thread).
  *
- * The document's layout hints steer it (docs/LANGUAGE.md, "Steering the
+ * The document's layout hints steer it (docs/STYLING.md, "Steering the
  * layout"): `direction` turns the flow, `rank` pins nodes to a layer and
  * `layout ordered` lays every edge out by declaration order. Of the layouts
  * in VARIANTS, the one with the fewest crossings wins, and among those the
@@ -298,7 +302,7 @@ async function layoutLevel(diagram: Diagram, getElk: () => Promise<ElkInstance>,
       elkNodes.set(node.id, { id: node.id, width: own.width, height: own.height, ports: [], layoutOptions: { 'elk.portConstraints': 'FIXED_POS' } });
       continue;
     }
-    const size = node.kind === 'group' ? {} : node.kind === 'text' ? TEXT_SIZE : node.ownerTeam ? COMPONENT_WITH_TEAM_SIZE : COMPONENT_SIZE;
+    const size = node.kind === 'group' ? {} : (options.nodeSize?.(node) ?? (node.kind === 'text' ? TEXT_SIZE : node.kind === 'system' ? SYSTEM_SIZE : node.ownerTeam ? COMPONENT_WITH_TEAM_SIZE : COMPONENT_SIZE));
     elkNodes.set(node.id, {
       id: node.id,
       ...size,

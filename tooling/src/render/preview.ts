@@ -5,7 +5,10 @@
  * content in place (a `postMessage`) as the document changes.
  */
 import { randomBytes } from 'node:crypto';
+import { analyze } from '../../../frontend/src/sim/analyze';
+import type { ProjectResolver } from '../imports';
 import { parse, type ParseOptions } from '../proschi';
+import { viewOverlay } from '../terminal/systems';
 import { renderSvgs } from './index';
 import { esc } from './svg';
 
@@ -17,17 +20,24 @@ export interface PreviewContent {
 
 /**
  * Renders a document's preview content: the diagrams, or the list of errors
- * that stop it rendering. `options` resolves imports, as for `parse`.
+ * that stop it rendering. `options` resolves imports, as for `parse`; a
+ * project resolver (`fileResolver`) also gives the reason an import failed,
+ * as `proschi check` and the language server do. System boxes show the
+ * simulation as `proschi render` draws them.
  */
-export async function renderPreviewContent(source: string, options?: ParseOptions): Promise<PreviewContent> {
-  const { diagram, diagnostics } = parse(source, options);
+export async function renderPreviewContent(source: string, options?: ParseOptions & { resolve?: ProjectResolver | ParseOptions['resolve'] }): Promise<PreviewContent> {
+  const result = parse(source, options);
+  const resolver = options?.resolve;
+  if (resolver && 'explain' in resolver) resolver.explain(result);
+  const { diagram, diagnostics } = result;
   const errors = diagnostics.filter((d) => d.severity === 'error');
   if (errors.length) {
     const items = errors.map((d) => `<li>${d.file ? `${esc(d.file)}: ` : ''}Line ${d.line}:${d.col}: ${esc(d.message)}</li>`).join('');
     return { ok: false, html: `<div class="errors"><strong>${errors.length} error(s)</strong>; the preview updates when they are fixed.<ul>${items}</ul></div>` };
   }
 
-  const { architecture, scenarios } = await renderSvgs(diagram, true);
+  const analysis = diagram.systems?.length && diagram.traffic?.length ? analyze(diagram) : undefined;
+  const { architecture, scenarios } = await renderSvgs(diagram, true, { systems: viewOverlay(diagram, analysis).systems });
   const parts = [`<h1>${esc(diagram.title ?? 'Architecture')}</h1>`, `<section><div class="figure">${architecture}</div></section>`];
   if (scenarios.length) {
     const groups = diagram.useCases

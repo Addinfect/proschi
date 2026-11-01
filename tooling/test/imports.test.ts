@@ -17,6 +17,8 @@ function capture(argv: string[]) {
 
 const dir = mkdtempSync(join(tmpdir(), 'proschi-imports-'));
 mkdirSync(join(dir, 'teams'));
+// The project root, so teams/ may import ../infra.proschi.
+writeFileSync(join(dir, 'proschi.json'), '{}');
 const infra = join(dir, 'infra.proschi');
 const checkout = join(dir, 'teams', 'checkout.proschi');
 const payments = join(dir, 'teams', 'payments.proschi');
@@ -104,18 +106,18 @@ describe('proschi check with imports', () => {
 
 describe('import analysis for editors', () => {
   const text = readFileSync(payments, 'utf8');
-  const a = analyze(text, { path: payments, resolve: fileResolver() });
+  const a = analyze(text, { path: payments, resolve: fileResolver({ entry: payments }) });
 
   it('turns errors in imported files into one error on the import line', () => {
     const broken = join(dir, 'broken.proschi');
     writeFileSync(broken, 'x [REST API]\nx [Redis]\ngroup g {\n');
     const src = 'import "broken.proschi"\nimport "infra.proschi"\n';
-    const result = analyze(src, { path: join(dir, 'root.proschi'), resolve: fileResolver() }).result;
+    const result = analyze(src, { path: join(dir, 'root.proschi'), resolve: fileResolver({ entry: join(dir, 'root.proschi') }) }).result;
     expect(ownDiagnostics(result)).toEqual([{ severity: 'error', message: "'broken.proschi' has 2 errors", line: 1, col: 8, length: 16 }]);
   });
 
   it('prefers text supplied by the editor over the disk', () => {
-    const resolve = fileResolver((p) => (p === infra ? 'orders [Redis]' : undefined));
+    const resolve = fileResolver({ entry: payments, read: (p) => (p === infra ? 'orders [Redis]' : undefined) });
     expect(analyze(text, { path: payments, resolve }).diagram.nodes.find((n) => n.id === 'orders')?.techStack).toBe('Redis');
   });
 

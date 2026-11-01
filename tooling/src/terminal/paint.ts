@@ -5,6 +5,7 @@ import { DEFAULT, E, Grid, N, S, W, hex } from './grid';
 import { iconOf, type IconStyle } from './icons';
 import type { Play } from './playback';
 import { legendWidth, stacked, type Path, type Rect, type Scene, type SceneNode } from './scene';
+import { loadText, type SystemBadge, type SystemStatus } from './systems';
 
 /**
  * Paints a scene into a grid the way the canvas draws it: dashed group
@@ -50,6 +51,10 @@ export interface PaintOptions {
   play?: Play;
   /** The tech icon in each card's icon tile, as on the canvas; Nerd Font glyphs by default. */
   icons?: IconStyle;
+  /** Promise, headroom and status of each system box and expanded frame (systems.ts). */
+  systems?: Record<string, SystemBadge>;
+  /** The system the plugin's keys act on, drawn in the accent. */
+  selected?: string;
 }
 
 const HEAD: Record<number, string> = { [N]: '▲', [S]: '▼', [E]: '►', [W]: '◄' };
@@ -71,7 +76,8 @@ export function paint(scene: Scene, options: PaintOptions = {}): Grid {
   const { play } = options;
   const all = [...scene.nodes.values()];
 
-  for (const g of all.filter((n) => n.node.kind === 'group').sort((a, b) => a.depth - b.depth)) drawGroup(grid, g, play ? 'path' : undefined);
+  const frameOf = (n: SceneNode) => (isFrame(n.node) ? { badge: options.systems?.[n.node.id], selected: options.selected === n.node.id } : undefined);
+  for (const g of all.filter((n) => n.node.kind === 'group').sort((a, b) => a.depth - b.depth)) drawGroup(grid, g, play ? 'path' : undefined, frameOf(g));
   // The cards behind cards with replicas, under the edges so a line leaving the front card crosses them.
   for (const n of all) drawStack(grid, scene, n, options.overlay?.[n.node.id], lookOf(play, n.node.id));
 
@@ -110,7 +116,7 @@ export function paint(scene: Scene, options: PaintOptions = {}): Grid {
   }
 
   // Over the edges, so a line crossing them leaves them whole: group names and descriptions, the replica counts.
-  for (const g of all) if (g.node.kind === 'group') drawGroupHeading(grid, g, play ? 'path' : undefined);
+  for (const g of all) if (g.node.kind === 'group') drawGroupHeading(grid, g, play ? 'path' : undefined, frameOf(g));
   for (const n of all) drawStackCount(grid, scene, n, options.overlay?.[n.node.id], lookOf(play, n.node.id));
 
   for (const packet of play?.packets ?? []) grid.set(packet.at.x, packet.at.y, packet.cut ? '✗' : '■', packet.error ? COLOR.fail : COLOR.pink);
@@ -119,6 +125,7 @@ export function paint(scene: Scene, options: PaintOptions = {}): Grid {
     if (n.node.kind === 'group') continue;
     const look = lookOf(play, n.node.id);
     if (n.node.kind === 'text') drawNote(grid, n, look);
+    else if (n.node.kind === 'system') drawSystem(grid, n, options.systems?.[n.node.id], look, options.selected === n.node.id);
     else drawCard(grid, scene, n, options.overlay?.[n.node.id], look, options.icons ?? 'nerd-font');
   }
 
@@ -196,16 +203,115 @@ function fill(grid: Grid, r: Rect, fg: number, bg: number): void {
 
 const fit = (text: string, room: number) => (text.length <= room ? text : room <= 1 ? '…'.slice(0, room) : text.slice(0, room - 1) + '…');
 
-function drawGroup(grid: Grid, { node, rect }: SceneNode, look: Look): void {
+/** The frame of an expanded system (dsl/view.ts): a group whose `system` is its own id. */
+const isFrame = (node: DiagramNode) => node.kind === 'group' && node.system === node.id;
+
+/** An expanded system's frame: its badge, and whether the plugin's keys act on it. */
+interface SystemFrame {
+  badge?: SystemBadge;
+  selected: boolean;
+}
+
+/** A system's color by its status, as a card's under the load overlay: red past capacity or its SLA, yellow running hot. */
+function statusColor(status: SystemStatus | undefined, ok: number): number {
+  if (status === 'saturated' || status === 'breach') return COLOR.fail;
+  if (status === 'hot') return COLOR.warn;
+  return status === 'idle' ? COLOR.muted : ok;
+}
+
+/** The status word on a system's top border. */
+const STATUS: Record<SystemStatus, string> = { ok: '✓ ok', hot: '▲ hot', saturated: '✗ saturated', breach: '✗ breaks SLA', idle: 'not simulated' };
+
+/** Double lines, for system boxes and frames: a team's design, set apart from a node and a group. */
+function doubleFrame(grid: Grid, r: Rect, color: number): void {
+  const right = r.x + r.w - 1;
+  const bottom = r.y + r.h - 1;
+  for (let x = r.x + 1; x < right; x++) {
+    grid.set(x, r.y, '═', color);
+    grid.set(x, bottom, '═', color);
+  }
+  for (let y = r.y + 1; y < bottom; y++) {
+    grid.set(r.x, y, '║', color);
+    grid.set(right, y, '║', color);
+  }
+  grid.set(r.x, r.y, '╔', color);
+  grid.set(right, r.y, '╗', color);
+  grid.set(r.x, bottom, '╚', color);
+  grid.set(right, bottom, '╝', color);
+}
+
+function drawGroup(grid: Grid, { node, rect }: SceneNode, look: Look, system?: SystemFrame): void {
+  if (system) return doubleFrame(grid, rect, system.selected ? COLOR.pink : fade(look, statusColor(system.badge?.status, baseColor(node, COLOR.muted))));
   frame(grid, rect, fade(look, baseColor(node, COLOR.muted)), node.style?.dash ?? 'dashed');
 }
 
-/** A group's name as a chip in its color, and its description under it, as the canvas shows them; drawn over the edges so they stay whole. */
-function drawGroupHeading(grid: Grid, { node, rect }: SceneNode, look: Look): void {
-  const color = fade(look, baseColor(node, COLOR.muted));
-  grid.text(rect.x + 2, rect.y, ` ${fit(node.name.toUpperCase(), rect.w - 6)} `, COLOR.onColor, Infinity, color);
+/**
+ * A group's name as a chip in its color, and its description under it, as
+ * the canvas shows them; drawn over the edges so they stay whole. An
+ * expanded system's chip is followed by its team, promise, load and status.
+ */
+function drawGroupHeading(grid: Grid, { node, rect }: SceneNode, look: Look, system?: SystemFrame): void {
+  const color = system ? (system.selected ? COLOR.pink : fade(look, statusColor(system.badge?.status, baseColor(node, COLOR.muted)))) : fade(look, baseColor(node, COLOR.muted));
+  const name = node.name.toUpperCase();
+  const badge = system?.badge;
+  // The chip and what follows it; a space and two cells of border stay before the corner.
+  const room = rect.w - 5;
+  let about = '';
+  if (badge) {
+    // Short of room, the load goes first, then the promise and the team; the name is cut only after them.
+    let parts = [STATUS[badge.status], badge.team ? `@${badge.team}` : '', badge.promise ?? '', loadText(badge)];
+    const width = () => name.length + 2 + parts.filter(Boolean).join(' · ').length;
+    for (const drop of [3, 2, 1]) if (width() > room) parts = parts.map((p, i) => (i === drop ? '' : p));
+    about = parts.filter(Boolean).join(' · ');
+  }
+  const chip = ` ${fit(name, badge ? Math.max(4, room - 2 - about.length) : rect.w - 6)} `;
+  grid.text(rect.x + 2, rect.y, chip, COLOR.onColor, Infinity, color);
+  const rest = room - chip.length;
+  if (about && rest > 4) grid.text(rect.x + 2 + chip.length, rect.y, `${fit(about, rest)} `, look ? COLOR.fadedMore : color);
   if (!node.description || rect.h <= 3) return;
   grid.text(rect.x + 2, rect.y + 1, fit(node.description.replace(/\s+/g, ' '), rect.w - 4), look ? COLOR.fadedMore : COLOR.muted);
+}
+
+/**
+ * A collapsed system (docs/design/team-systems-and-imports.md D3): a double
+ * border, its name and @team, the team's promise, and what it is sent
+ * against its headroom with a bar of how busy that makes it. The border and
+ * status word go yellow running hot and red past capacity or its SLA, and the
+ * box fills with its heat like a busy card; selected, the border is the accent.
+ */
+function drawSystem(grid: Grid, { node, rect }: SceneNode, badge: SystemBadge | undefined, look: Look, selected: boolean): void {
+  const accent = look === 'failing' ? COLOR.fail : look === 'lit' || selected ? COLOR.pink : undefined;
+  const status = badge?.status;
+  const color = accent ?? fade(look, statusColor(status, baseColor(node, COLOR.line)));
+  const heat = look || !badge || badge.utilization === undefined ? undefined : heatOf({ utilization: badge.utilization, saturated: status === 'saturated' });
+  const ink = heat !== undefined ? COLOR.onColor : look === 'off' ? COLOR.fadedMore : DEFAULT;
+  const muted = heat !== undefined ? COLOR.onColor : look === 'off' ? COLOR.fadedMore : COLOR.muted;
+  fill(grid, rect, DEFAULT, DEFAULT);
+  if (heat !== undefined) fill(grid, { x: rect.x + 1, y: rect.y + 1, w: rect.w - 2, h: rect.h - 2 }, COLOR.onColor, heat);
+  doubleFrame(grid, rect, color);
+
+  const left = rect.x + 2;
+  const room = rect.w - 4;
+  if (status && rect.w > 14) {
+    const word = ` ${fit(STATUS[status], rect.w - 8)} `;
+    grid.text(rect.x + rect.w - 2 - word.length, rect.y, word, look ? muted : statusColor(status, COLOR.muted));
+  }
+  grid.text(left, rect.y + 1, fit(node.name, room), ink, Infinity, heat);
+  grid.text(left, rect.y + 2, fit(badge?.team ? `@${badge.team}` : 'system', room), muted, Infinity, heat);
+  if (!badge) return;
+  grid.text(left, rect.y + 3, fit(badge.promise ? `promise ${badge.promise}` : 'no promise', room), badge.promise ? ink : muted, Infinity, heat);
+  if (rect.h < 6) return;
+  const long = `${loadText(badge)} sent / headroom`;
+  const text = fit(long.length <= room ? long : loadText(badge), room);
+  grid.text(left, rect.y + 4, text, ink, Infinity, heat);
+  const bar = room - text.length - 1;
+  if (bar < 4 || !Number.isFinite(badge.headroomRps) || badge.headroomRps <= 0) return;
+  const share = badge.sentRps / badge.headroomRps;
+  const filled = Math.max(share > 0 ? 1 : 0, Math.min(bar, Math.round(share * bar)));
+  for (let i = 0; i < bar; i++) {
+    const full = i < filled;
+    grid.set(left + text.length + 1 + i, rect.y + 4, full ? '━' : '─', heat !== undefined ? COLOR.onColor : full ? ink : COLOR.muted, heat);
+  }
 }
 
 /** The canvas's icon tile: a square of the card's color left of the name, the icon dark on it. */

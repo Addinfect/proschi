@@ -293,7 +293,7 @@
 .toc__list > li {
   counter-increment: toc;
 }
-.toc a {
+.toc__list a {
   position: relative;
   display: flex;
   gap: 10px;
@@ -323,16 +323,16 @@
   font-size: var(--fs-12);
   color: rgb(var(--c-ink) / 0.7);
 }
-.toc a:hover {
+.toc__list a:hover {
   background: rgb(var(--c-ink) / 0.06);
   color: rgb(var(--c-ink));
 }
-.toc a.is-current {
+.toc__list a.is-current {
   background: rgb(var(--c-yellow));
   border-left-color: rgb(var(--c-pink));
   color: rgb(var(--c-on-accent));
 }
-.toc a.is-current::before {
+.toc__list a.is-current::before {
   color: rgb(var(--c-on-accent));
 }
 
@@ -397,6 +397,20 @@
   }
   .toc-inline {
     display: none;
+  }
+}
+
+/* A page with an annotated example needs the width for code beside its diagram: "On this page" stays inline. */
+@media (min-width: 1280px) {
+  .docs:has(.live--annotated) {
+    grid-template-columns: 208px minmax(0, 1fr);
+    grid-template-areas: 'nav main';
+  }
+  .docs:has(.live--annotated) .docs-toc {
+    display: none;
+  }
+  .docs:has(.live--annotated) .toc-inline {
+    display: block;
   }
 }
 
@@ -643,6 +657,32 @@
   margin: 2.4em 0;
 }
 
+/* Images (docs/images): diagrams, concept drawings and editor screenshots,
+   each a light card in both themes, since the pictures bring their own
+   light background. Width and height come from the file; a tall diagram
+   shrinks to fit the screen. */
+.doc-body > .doc-figure {
+  margin: 0 0 1.6em;
+}
+.doc-figure > img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: min(80vh, 760px);
+  margin: 0 auto;
+  background: #fff8e7;
+  border: var(--bw-2) solid rgb(var(--c-ink));
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-sm);
+}
+.doc-figure > figcaption {
+  margin-top: 10px;
+  text-align: center;
+  font-size: var(--fs-14);
+  color: var(--ink-3);
+}
+
 /* Inline code */
 .doc :not(pre) > code {
   padding: 0.1em 0.35em;
@@ -754,6 +794,249 @@
   border-top: var(--bw-2) solid rgb(var(--c-ink));
 }
 /* The bar and the stage are in live.css, which the island (and the embed page) loads. */
+
+/* A try-it prompt (> **Try it:** right after a live example) hangs under it, as part of the same card. */
+.doc-body > .live:has(+ .try-it) {
+  margin-bottom: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  /* The prompt below carries the shadow on, so the two read as one card. */
+  box-shadow: var(--sh-md);
+  clip-path: inset(0 -6px 0 0);
+}
+.doc-body > .try-it {
+  margin-top: 0;
+  padding: 10px 16px 10px 44px;
+  position: relative;
+  background: rgb(var(--c-yellow) / 0.22);
+  border: var(--bw-2) solid rgb(var(--c-ink));
+  border-top: 0;
+  border-radius: 0 0 var(--r-md) var(--r-md);
+  box-shadow: var(--sh-md);
+  font-size: 0.95rem;
+}
+.doc-body > .try-it > p {
+  margin: 0;
+}
+.doc-body > .try-it::before {
+  content: '';
+  position: absolute;
+  left: 18px;
+  top: calc(10px + 0.75em - 6px);
+  width: 0;
+  height: 0;
+  border-left: 9px solid rgb(var(--c-ink));
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+}
+.doc-body > .try-it strong:first-child {
+  margin-right: 2px;
+}
+
+/* ---------- annotated examples (```proschi annotated) ---------- */
+
+.live--annotated::before {
+  content: 'Annotated example';
+}
+/* clip, not hidden: hidden would make the figure the scroller its docked diagram sticks to. */
+.live--annotated {
+  overflow: clip;
+}
+/* Without JavaScript, the notes are a list under the code. */
+.annotated__notes {
+  margin: 0;
+  padding: 14px 18px 16px 2.6em;
+  border-top: var(--bw-1) solid rgb(var(--c-ink) / 0.16);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+.annotated__notes li + li {
+  margin-top: 8px;
+}
+.annotated__src {
+  display: block;
+  overflow-wrap: anywhere;
+  color: rgb(var(--c-muted));
+  font: 600 0.8rem/1.45 var(--font-mono);
+}
+.annotated__notes code:not(.annotated__src),
+.annotated__note code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+}
+.live--annotated.is-live .annotated__notes {
+  display: none;
+}
+.live--annotated .annotated__code {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.live--annotated pre.code {
+  padding-left: 26px;
+}
+.live--annotated pre.code .line {
+  position: relative;
+  display: inline-block;
+  min-width: calc(100% + 16px);
+  margin: 0 -8px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+}
+/* A marked line: a short bar in the gutter says it has a note. */
+.live--annotated.is-live .line.is-annotated {
+  cursor: pointer;
+  outline: none;
+}
+.live--annotated.is-live .line.is-annotated::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 0.35em;
+  bottom: 0.35em;
+  width: 4px;
+  border-radius: 2px;
+  background: rgb(var(--c-pink) / 0.55);
+  transition: width 0.12s ease, left 0.12s ease;
+}
+.live--annotated.is-live .line.is-annotated:hover,
+.live--annotated.is-live .line.is-active {
+  background: rgb(var(--c-pink) / 0.14);
+}
+.live--annotated.is-live .line.is-active::before {
+  left: -14px;
+  top: 0.15em;
+  bottom: 0.15em;
+  width: 6px;
+  background: rgb(var(--c-pink));
+}
+.live--annotated.is-live .line.is-annotated:focus-visible {
+  box-shadow: inset 0 0 0 2px rgb(var(--c-ink));
+}
+/* The note of the current line (an aria-live region), with the diagram in the dock. */
+.annotated__dock {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.annotated__dock .live__slot {
+  border-top: var(--bw-2) solid rgb(var(--c-ink));
+}
+.annotated__note {
+  margin: 0;
+  min-height: 5.2em;
+  padding: 12px 16px 14px;
+  border-top: var(--bw-2) solid rgb(var(--c-ink));
+  background: rgb(var(--c-paper));
+  color: rgb(var(--c-muted));
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+.annotated__note.has-note {
+  color: rgb(var(--c-ink));
+  background: rgb(var(--c-pink) / 0.1);
+}
+.annotated__where {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 7px;
+  background: rgb(var(--c-ink));
+  color: rgb(var(--c-paper));
+  border-radius: var(--r-pill);
+  font: 700 0.72rem/1.5 var(--font-mono);
+  vertical-align: 0.08em;
+}
+/* What the current line draws: an outline around the box, a thick arrow, the rest faded. */
+.live__stage .react-flow__node,
+.live__stage .react-flow__edge {
+  transition: opacity 0.2s ease;
+}
+.live__stage .react-flow__node.doc-dim,
+.live__stage .react-flow__edge.doc-dim {
+  opacity: 0.25;
+}
+.live__stage .react-flow__node.doc-lit {
+  outline: 3px solid rgb(var(--c-pink));
+  outline-offset: 5px;
+  border-radius: var(--r-md);
+}
+.live__stage .react-flow__edge.doc-lit .react-flow__edge-path {
+  stroke: rgb(var(--c-pink)) !important;
+  stroke-width: 4px !important;
+}
+.live__stage .react-flow__edge.doc-lit .pc-edge-head {
+  fill: rgb(var(--c-pink)) !important;
+}
+
+/* A page with an annotated example gives it the width of the sidebar's neighbour: code beside the diagram. */
+.doc:has(.live--annotated) {
+  max-width: 1000px;
+}
+.doc:has(.live--annotated) .doc-body > :not(.live--annotated, .try-it, .table-wrap) {
+  max-width: var(--measure);
+}
+.doc-body:has(.live--annotated) {
+  container-type: inline-size;
+}
+@container (min-width: 760px) {
+  .live--annotated.is-live {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  }
+  .live--annotated.is-live::before {
+    grid-column: 1 / -1;
+  }
+  .live--annotated .annotated__dock {
+    border-left: var(--bw-2) solid rgb(var(--c-ink));
+  }
+  .live--annotated .annotated__dock .live__slot {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    border-top: 0;
+  }
+  /* Under the diagram, where the lit box is. */
+  .live--annotated .annotated__note {
+    order: 2;
+  }
+  .live--annotated.is-live .live__island {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+  }
+  .live--annotated.is-live .live__stage:not(.live__stage--playing) {
+    flex: 1;
+    min-height: 340px;
+  }
+}
+/* On a phone the note and the diagram dock to the bottom of the screen while the code scrolls past (not while playing). */
+@container (max-width: 759.98px) {
+  .live--annotated .annotated__dock:not(:has(.live__stage--playing)) {
+    position: sticky;
+    bottom: 0;
+    z-index: 3;
+    border-top: var(--bw-2) solid rgb(var(--c-ink));
+    background: rgb(var(--c-paper));
+    box-shadow: 0 -8px 16px rgb(var(--c-shadow) / 0.12);
+  }
+  .live--annotated .annotated__note {
+    min-height: 4.6em;
+    padding: 8px 14px 10px;
+    border-top: 0;
+    font-size: 0.9rem;
+  }
+  .live--annotated .live__bar {
+    padding: 8px 12px;
+  }
+  .live--annotated .live__single {
+    display: none;
+  }
+  /* Short screens get a shorter diagram, so the code above the dock still has room to tap. */
+  .live--annotated .live__stage:not(.live__stage--playing) {
+    height: 220px;
+    height: clamp(140px, 26svh, 220px);
+  }
+}
 
 /* ---------- tables ---------- */
 

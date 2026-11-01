@@ -1,5 +1,38 @@
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import type { Page } from '@playwright/test';
 import { canvasNodes, expect, test } from './fixtures';
+
+/** The built docs pages, dist/docs/**\/index.html, as URLs. */
+const DIST = new URL('../dist/', import.meta.url);
+const builtDocs = (readdirSync(new URL('docs/', DIST), { recursive: true, encoding: 'utf8' }) as string[])
+  .filter((f) => f === 'index.html' || f.endsWith('/index.html'))
+  .map((f) => new URL(`docs/${f}`, DIST));
+
+test('every internal link and #anchor in the built docs resolves', () => {
+  const ids = new Map<string, Set<string>>();
+  const idsOf = (file: URL): Set<string> => {
+    if (!ids.has(file.href)) ids.set(file.href, new Set([...readFileSync(file, 'utf8').matchAll(/\sid="([^"]+)"/g)].map((m) => m[1])));
+    return ids.get(file.href)!;
+  };
+  const broken: string[] = [];
+  for (const page of builtDocs) {
+    const html = readFileSync(page, 'utf8');
+    for (const [, raw] of html.matchAll(/\shref="([^"]+)"/g)) {
+      const href = raw.replace(/&amp;/g, '&');
+      if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('//')) continue;
+      const url = new URL(href, page);
+      if (!url.href.startsWith(DIST.href)) continue;
+      let file = new URL(url.pathname, url);
+      if (existsSync(file) && statSync(file).isDirectory()) file = new URL('index.html', file.href.endsWith('/') ? file : `${file.href}/`);
+      const at = page.href.slice(DIST.href.length);
+      if (!existsSync(file)) broken.push(`${at}: ${href}`);
+      // #/review and the like are the practice app's routes, not anchors.
+      else if (url.hash && !url.hash.startsWith('#/') && file.pathname.endsWith('.html') && !idsOf(file).has(decodeURIComponent(url.hash.slice(1)))) broken.push(`${at}: ${href}`);
+    }
+  }
+  expect(builtDocs.length).toBeGreaterThan(20);
+  expect(broken).toEqual([]);
+});
 
 const sidebar = (page: Page) => page.getByRole('navigation', { name: 'Docs' });
 
@@ -8,7 +41,7 @@ test.describe('docs', () => {
     await page.goto('./');
     await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Docs' }).click();
     await expect(page).toHaveURL(/\/proschi\/docs\/$/);
-    await expect(page).toHaveTitle('Proschi docs');
+    await expect(page).toHaveTitle('Proschi: architecture diagrams as code');
     await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Docs' })).toHaveAttribute('aria-current', 'page');
 
     await sidebar(page).getByRole('link', { name: 'Quickstart' }).click();
@@ -27,11 +60,11 @@ test.describe('docs', () => {
     await page.getByRole('link', { name: 'language reference', exact: true }).click();
     await expect(page).toHaveURL(/\/proschi\/docs\/language\/$/);
     await sidebar(page).getByRole('link', { name: 'Scenarios' }).click();
-    await expect(page).toHaveURL(/\/docs\/language\/#scenarios$/);
-    await expect(page.getByRole('heading', { level: 2, name: /^Scenarios/ })).toBeInViewport();
+    await expect(page).toHaveURL(/\/docs\/scenarios\/$/);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(/^Scenarios/);
 
     await page.getByRole('navigation', { name: 'Previous and next page' }).getByRole('link', { name: /Next/ }).click();
-    await expect(page).toHaveURL(/\/proschi\/docs\/model\/$/);
+    await expect(page).toHaveURL(/\/proschi\/docs\/imports\/$/);
   });
 
   test('a live example draws its diagram and plays a scenario', async ({ page }) => {

@@ -15,12 +15,22 @@ import { highlightLines } from '../src/landing/highlight'
  *   ours, but the pages' CSP and the docs' GitHub rendering both prefer plain
  *   Markdown. A source ending in .html is a trusted fragment, kept as is.
  * - Headings get GitHub's anchors, so links written for GitHub keep working.
- * - Links between the Markdown files (LANGUAGE.md#grammar), to
+ * - Links between the Markdown files (GRAMMAR.md#productions), to
  *   https://proschi.app/… and to the GitHub copies of the docs become links
  *   within the site; links to other repository files go to GitHub.
  * - ```proschi fences become <figure data-live> with the code highlighted
  *   and its source in base64; src/docs/main.ts turns them into live
  *   diagrams. ```proschi fragment is highlighted only (a partial document).
+ * - ```proschi annotated is a live example whose `# @note …` lines become
+ *   notes on the line after them (splitAnnotations); the notes also render
+ *   as a list under the code, for readers without JavaScript.
+ * - A `> **Try it:**` blockquote right after a live example gets the class
+ *   try-it, so it reads as a prompt attached to that example.
+ * - `anchorRedirects` in site.json maps a page's old anchors to their new
+ *   home; the page carries its map in data-anchor-redirects (main.ts follows it).
+ * - An image alone in a paragraph, `![alt](images/x.svg "Caption")`, becomes
+ *   a figure with its size, lazily loaded, and the title as its caption. It
+ *   must be an .svg or .png under docs/images/, published at /docs/images/.
  */
 
 export const REPO = 'gvart/proschi'
@@ -48,6 +58,8 @@ export interface NavItem {
 export interface SiteConfig {
   pages: DocPage[]
   nav: { title: string; items: NavItem[] }[]
+  /** Per page slug: an old anchor → where it lives now, relative to /docs/ (`hld/#traffic`, `scenarios/`). */
+  anchorRedirects?: Record<string, Record<string, string>>
 }
 
 export interface TocEntry {
@@ -65,6 +77,24 @@ export interface RenderedPage {
   examples: string[]
   /** Every heading anchor. */
   anchors: Set<string>
+  /** The images it shows, relative to docs/ (images/org.svg). */
+  images: string[]
+}
+
+/** A docs image's size in CSS pixels: an SVG's width and height, a PNG's pixels (halved for name@2x.png). */
+export function imageSize(file: string): { width: number; height: number } {
+  if (file.endsWith('.svg')) {
+    const root = /<svg\b[^>]*>/.exec(readFileSync(file, 'utf8'))?.[0] ?? ''
+    const attr = (name: string) => Number(new RegExp(`\\s${name}="([\\d.]+)"`).exec(root)?.[1])
+    const [, , w, h] = (/\sviewBox="([^"]+)"/.exec(root)?.[1] ?? '').trim().split(/[\s,]+/).map(Number)
+    const width = attr('width') || w
+    const height = attr('height') || h
+    if (!width || !height) throw new Error(`${file}: the SVG needs a width and height or a viewBox`)
+    return { width, height }
+  }
+  const png = readFileSync(file)
+  const scale = file.endsWith('@2x.png') ? 2 : 1
+  return { width: Math.round(png.readUInt32BE(16) / scale), height: Math.round(png.readUInt32BE(20) / scale) }
 }
 
 /** The way from a docs page to the site root, and to the docs root. */
@@ -95,14 +125,74 @@ export function slugger(): (text: string) => string {
   }
 }
 
-/** Highlighted HTML of a Proschi snippet, one span.line per line, like src/landing/highlight.ts does in the browser. */
-export function highlightProschi(source: string): string {
+/** Highlighted HTML of a Proschi snippet, one span.line per line, like src/landing/highlight.ts does in the browser. `attrs` adds attributes to a line (0-based). */
+export function highlightProschi(source: string, attrs?: (line: number) => string): string {
   return highlightLines(source.split('\n'))
-    .map((segments) => {
+    .map((segments, i) => {
       const html = segments.map((s) => (s.cls ? `<span class="tok-${s.cls}">${escapeHtml(s.text)}</span>` : escapeHtml(s.text))).join('')
-      return `<span class="line">${html}</span>`
+      return `<span class="line"${attrs?.(i) ?? ''}>${html}</span>`
     })
     .join('\n')
+}
+
+export interface Annotation {
+  /** 1-based line of the annotated code (after the note lines are removed). */
+  line: number
+  text: string
+}
+
+const NOTE_PREFIX = '# @note '
+
+/**
+ * The code and notes of a ```proschi annotated fence: a `# @note …` line
+ * annotates the next line that is neither blank nor a note, consecutive notes
+ * join with spaces, and every note line is removed from the code.
+ */
+export function splitAnnotations(source: string, where = 'annotated example'): { code: string; notes: Annotation[] } {
+  const code: string[] = []
+  const notes: Annotation[] = []
+  let pending: string[] = []
+  for (const line of source.split('\n')) {
+    const trimmed = line.trim()
+    if (trimmed.startsWith(NOTE_PREFIX)) pending.push(trimmed.slice(NOTE_PREFIX.length).trim())
+    else {
+      if (trimmed && pending.length > 0) {
+        notes.push({ line: code.length + 1, text: pending.join(' ') })
+        pending = []
+      }
+      code.push(line)
+    }
+  }
+  if (pending.length > 0) throw new Error(`${where}: the note "${pending.join(' ')}" annotates nothing (no line follows it)`)
+  if (notes.length === 0) throw new Error(`${where}: an annotated example needs at least one # @note line`)
+  return { code: code.join('\n'), notes }
+}
+
+/** A note's text: plain, with `backticks` as code. */
+const noteHtml = (text: string): string =>
+  text
+    .split(/(`[^`]+`)/)
+    .map((part) => (/^`[^`]+`$/.test(part) ? `<code>${escapeHtml(part.slice(1, -1))}</code>` : escapeHtml(part)))
+    .join('')
+
+function annotatedFigure(source: string, where: string): { html: string; code: string } {
+  const { code, notes } = splitAnnotations(source, where)
+  const lines = code.split('\n')
+  const index = new Map(notes.map((n, i) => [n.line - 1, i]))
+  const pre = `<pre class="code code--proschi" data-lang="proschi" tabindex="0"><code>${highlightProschi(code, (i) => (index.has(i) ? ` data-note="${index.get(i)}"` : ''))}</code></pre>`
+  const items = notes
+    .map((n, i) => `<li data-note="${i}"><code class="annotated__src">${escapeHtml(lines[n.line - 1].trim())}</code> <span class="annotated__text">${noteHtml(n.text)}</span></li>`)
+    .join('\n')
+  const html = `<figure class="live live--annotated" data-live data-annotated data-source="${base64(code)}">
+<div class="annotated__code">
+${pre}
+<ol class="annotated__notes" aria-label="Notes on the example">
+${items}
+</ol>
+</div>
+</figure>
+`
+  return { html, code }
 }
 
 const base64 = (s: string): string => Buffer.from(s, 'utf8').toString('base64')
@@ -113,6 +203,24 @@ export interface LinkContext {
   from: string
   /** Its source, relative to the repository root, e.g. docs/LANGUAGE.md. */
   sourcePath: string
+  /** For a page outside /docs/ (the blog): its way to the docs root, e.g. '../../docs/'. Links to docs pages then start there. */
+  docsRoot?: string
+  /** For a page that may show images (the blog): the src to publish an image at, given its src in the source. Without it, an image is an error. */
+  image?: (src: string) => string
+  /** For a docs page: docs/ on disk, where its images are read from (under images/). It collects them in `images`. */
+  docsImages?: { docsDir: string; images: string[] }
+}
+
+/** A docs page's image: checked, sized and collected; its src on the page. */
+function docsImage(src: string, ctx: LinkContext, docs: NonNullable<LinkContext['docsImages']>): { src: string; width: number; height: number } {
+  const path = posix.normalize(src)
+  const fail = (what: string) => new Error(`${ctx.sourcePath}: image ${src} ${what}`)
+  if (/^[a-z]+:/i.test(src) || !path.startsWith('images/')) throw fail('must be a file under docs/images/')
+  if (!/\.(svg|png)$/.test(path)) throw fail('must be an .svg or a .png')
+  const file = join(docs.docsDir, path)
+  if (!existsSync(file)) throw fail('does not exist')
+  if (!docs.images.includes(path)) docs.images.push(path)
+  return { src: toDocsRoot(ctx.from) + path, ...imageSize(file) }
 }
 
 /** Repository path (docs/LANGUAGE.md) → page slug. */
@@ -127,14 +235,16 @@ export function rewriteHref(href: string, ctx: LinkContext): string {
   const [path, anchor] = splitAnchor(href)
   const local = (repoPath: string): string | undefined => {
     const slug = slugs.get(posix.normalize(repoPath))
-    return slug === undefined ? undefined : pageHref(ctx.from, slug, anchor)
+    return slug === undefined ? undefined : docsHref(slug)
   }
+  const docsHref = (slug: string): string =>
+    ctx.docsRoot === undefined ? pageHref(ctx.from, slug, anchor) : `${ctx.docsRoot}${slug ? `${slug}/` : ''}${anchor ? `#${anchor}` : ''}`
 
   if (path.startsWith(SITE_ORIGIN)) {
     const sitePath = path.slice(SITE_ORIGIN.length)
     // The model page moved into the docs; model/ only forwards there.
     const docsSlug = sitePath === 'model/' ? 'model' : /^docs\/(.*?)\/?$/.exec(sitePath)?.[1]
-    if (docsSlug !== undefined && ctx.config.pages.some((p) => p.slug === docsSlug)) return pageHref(ctx.from, docsSlug, anchor)
+    if (docsSlug !== undefined && ctx.config.pages.some((p) => p.slug === docsSlug)) return docsHref(docsSlug)
     return toSiteRoot(ctx.from) + sitePath + (anchor ? `#${anchor}` : '')
   }
   if (path.startsWith(BLOB)) return local(path.slice(BLOB.length)) ?? href
@@ -188,9 +298,46 @@ function markdown(ctx: LinkContext, toc: TocEntry[], examples: string[]): Markdo
     return defaultLink(tokens, idx, options, env, self)
   }
 
+  // A docs image alone in its paragraph is a figure, its title the caption.
+  const figure = (inline: Token | undefined) => {
+    const kids = (inline?.children ?? []).filter((t) => !(t.type === 'text' && t.content.trim() === '') && t.type !== 'softbreak')
+    return kids.length === 1 && kids[0].type === 'image' ? kids[0] : undefined
+  }
+  const defaultParagraphOpen = md.renderer.rules.paragraph_open ?? ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options))
+  const defaultParagraphClose = md.renderer.rules.paragraph_close ?? ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options))
+  md.renderer.rules.paragraph_open = (tokens, idx, options, env, self) =>
+    ctx.docsImages && figure(tokens[idx + 1]) ? '<figure class="doc-figure">' : defaultParagraphOpen(tokens, idx, options, env, self)
+  md.renderer.rules.paragraph_close = (tokens, idx, options, env, self) => {
+    const img = ctx.docsImages ? figure(tokens[idx - 1]) : undefined
+    if (!img) return defaultParagraphClose(tokens, idx, options, env, self)
+    const caption = String(img.attrGet('title') ?? '')
+    return `${caption ? `<figcaption>${escapeHtml(caption)}</figcaption>` : ''}</figure>\n`
+  }
+
   md.renderer.rules.image = (tokens, idx) => {
+    const token = tokens[idx]
+    if (ctx.docsImages) {
+      const alt = textOf(token.children)
+      if (!alt) throw new Error(`${ctx.sourcePath}: image ${token.attrGet('src')} needs alt text`)
+      const img = docsImage(String(token.attrGet('src') ?? ''), ctx, ctx.docsImages)
+      return `<img src="${escapeHtml(img.src)}" alt="${escapeHtml(alt)}" width="${img.width}" height="${img.height}" loading="lazy" decoding="async" />`
+    }
+    if (ctx.image) return `<img src="${escapeHtml(ctx.image(String(token.attrGet('src') ?? '')))}" alt="${escapeHtml(textOf(token.children))}" loading="lazy" />`
     throw new Error(`${ctx.sourcePath}: images are not supported on the site (${tokens[idx].attrGet('src')})`)
   }
+
+  // A "> **Try it:** …" right after a live example is that example's prompt.
+  md.core.ruler.push('proschi_try_it', (state) => {
+    const tokens = state.tokens
+    for (let i = 1; i < tokens.length; i++) {
+      const prev = tokens[i - 1]
+      if (tokens[i].type !== 'blockquote_open' || prev.type !== 'fence') continue
+      const [lang, ...flags] = prev.info.trim().split(/\s+/)
+      if (lang !== 'proschi' || flags.includes('fragment')) continue
+      const first = (tokens[i + 2]?.children ?? []).filter((t) => t.type !== 'text' || t.content !== '')
+      if (first[0]?.type === 'strong_open' && first[1]?.content === 'Try it:') tokens[i].attrSet('class', 'try-it')
+    }
+  })
 
   md.renderer.rules.table_open = () => '<div class="table-wrap" tabindex="0">\n<table>\n'
   md.renderer.rules.table_close = () => '</table>\n</div>\n'
@@ -203,11 +350,25 @@ function markdown(ctx: LinkContext, toc: TocEntry[], examples: string[]): Markdo
       return `<pre class="code"${label} tabindex="0"><code>${escapeHtml(source)}</code></pre>\n`
     }
     const pre = `<pre class="code code--proschi" data-lang="proschi" tabindex="0"><code>${highlightProschi(source)}</code></pre>`
+    if (flags.includes('annotated')) {
+      if (flags.includes('fragment')) throw new Error(`${ctx.sourcePath}: a proschi fence cannot be both annotated and a fragment`)
+      const { html, code } = annotatedFigure(source, `${ctx.sourcePath}, line ${(tokens[idx].map?.[0] ?? 0) + 1}`)
+      examples.push(code)
+      return html
+    }
     if (flags.includes('fragment')) return `${pre}\n`
     examples.push(source)
     return `<figure class="live" data-live data-source="${base64(source)}">\n${pre}\n</figure>\n`
   }
   return md
+}
+
+/** Markdown rendered like a docs page's (anchors, links, live examples), for pages outside /docs/ (plugins/blogSite.ts). */
+export function renderMarkdown(source: string, ctx: LinkContext): { html: string; toc: TocEntry[]; examples: string[] } {
+  const toc: TocEntry[] = []
+  const examples: string[] = []
+  const html = markdown(ctx, toc, examples).render(source)
+  return { html, toc, examples }
 }
 
 /** The first heading of a fragment or a Markdown file is the page's h1; this takes it out. */
@@ -224,10 +385,11 @@ const stripTags = (s: string): string =>
   decodeEntities(s.replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim()
 
 /** Renders one page's article from its source text. */
-export function renderPage(config: SiteConfig, page: DocPage, source: string): RenderedPage {
+export function renderPage(config: SiteConfig, page: DocPage, source: string, docsDir?: string): RenderedPage {
   const sourcePath = posix.normalize(posix.join('docs', page.source))
   const toc: TocEntry[] = []
   const examples: string[] = []
+  const images: string[] = []
   const group = config.nav.find((g) => g.items.some((i) => i.page === page.slug && !i.anchor))?.title ?? 'Docs'
   let article: string
 
@@ -242,7 +404,8 @@ export function renderPage(config: SiteConfig, page: DocPage, source: string): R
       toc.push({ level: Number(m[1]) as 2 | 3, id: m[2], text: stripTags(m[3]) })
     }
   } else {
-    const html = markdown({ config, from: page.slug, sourcePath }, toc, examples).render(source)
+    const docsImages = docsDir === undefined ? undefined : { docsDir, images }
+    const html = markdown({ config, from: page.slug, sourcePath, docsImages }, toc, examples).render(source)
     const { h1, body } = splitTitle(html)
     // The paragraph right after the title is the lede.
     const lede = body.replace(/^\s*<p>/, '<p class="lede">')
@@ -250,7 +413,7 @@ export function renderPage(config: SiteConfig, page: DocPage, source: string): R
   }
 
   const anchors = new Set([...article.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]))
-  return { page, article, toc, examples, anchors }
+  return { page, article, toc, examples, anchors, images }
 }
 
 function navHtml(config: SiteConfig, current: string): string {
@@ -276,7 +439,8 @@ function navHtml(config: SiteConfig, current: string): string {
 }
 
 function tocHtml(toc: TocEntry[]): string {
-  if (toc.length === 0) return ''
+  // A single entry is no table of contents: the page goes without one.
+  if (toc.length < 2) return ''
   const items: string[] = []
   let open = false
   for (const entry of toc) {
@@ -322,7 +486,9 @@ export function layoutHtml(config: SiteConfig, rendered: RenderedPage): string {
   const toc = tocHtml(rendered.toc)
   const repoPath = posix.normalize(posix.join('docs', page.source))
   const edit = page.source.endsWith('.md') ? `https://github.com/${REPO}/edit/main/${repoPath}` : `${BLOB}${repoPath}`
-  return `<div class="docs" data-site-root="${toSiteRoot(page.slug)}">
+  const redirects = config.anchorRedirects?.[page.slug]
+  const redirectAttr = redirects && Object.keys(redirects).length > 0 ? ` data-anchor-redirects="${escapeHtml(JSON.stringify(redirects))}"` : ''
+  return `<div class="docs" data-site-root="${toSiteRoot(page.slug)}"${redirectAttr}>
 <a class="docs-drawer-open" href="#docs-nav" aria-controls="docs-nav"><span class="docs-drawer-open__icon" aria-hidden="true"></span>Docs menu</a>
 <nav class="docs-nav" id="docs-nav" aria-label="Docs">
 <div class="docs-nav__head"><span class="docs-nav__heading">Docs</span><a class="docs-drawer-close" href="#main" aria-label="Close the docs menu">×</a></div>
@@ -341,7 +507,8 @@ ${toc ? `<aside class="docs-toc">\n<nav class="toc" aria-label="On this page">\n
 
 export function headHtml(page: DocPage): string {
   const url = `${SITE_ORIGIN}docs/${page.slug ? `${page.slug}/` : ''}`
-  const title = page.slug ? `${page.title} · Proschi docs` : 'Proschi docs'
+  // The home page's title names the product already.
+  const title = page.slug ? `${page.title} · Proschi docs` : page.title
   return [
     `<title>${escapeHtml(title)}</title>`,
     `<meta name="description" content="${escapeHtml(page.description)}" />`,
@@ -361,7 +528,7 @@ export function readSite(docsDir: string): SiteConfig {
 }
 
 export function renderFromDisk(docsDir: string, config: SiteConfig, page: DocPage): RenderedPage {
-  return renderPage(config, page, readFileSync(join(docsDir, page.source), 'utf8'))
+  return renderPage(config, page, readFileSync(join(docsDir, page.source), 'utf8'), docsDir)
 }
 
 /** The stub pages under `stubsDir` (frontend/docs), as rollup inputs: docs, docs/quickstart, … */
@@ -394,6 +561,19 @@ export function docsSite({ docsDir, stubsDir }: { docsDir: string; stubsDir: str
       server.watcher.on('change', (file) => {
         if (file.startsWith(docsDir) || file.endsWith('model.html')) server.ws.send({ type: 'full-reload' })
       })
+      // `npm run dev`: the pages' images, as the build publishes them.
+      server.middlewares.use((req, res, next) => {
+        const m = /^\/docs\/(images\/[\w/.@-]+\.(svg|png))$/.exec(req.url?.split('?')[0] ?? '')
+        const file = m && !m[1].includes('..') ? join(docsDir, m[1]) : undefined
+        if (!file || !existsSync(file)) return next()
+        res.setHeader('Content-Type', m![2] === 'svg' ? 'image/svg+xml' : 'image/png')
+        res.end(readFileSync(file))
+      })
+    },
+    generateBundle() {
+      const site = readSite(docsDir)
+      const images = new Set(site.pages.flatMap((p) => renderFromDisk(docsDir, site, p).images))
+      for (const path of images) this.emitFile({ type: 'asset', fileName: `docs/${path}`, source: readFileSync(join(docsDir, path)) })
     },
     transformIndexHtml: {
       order: 'pre',

@@ -1,0 +1,112 @@
+/* The blog (/blog/, plugins/blogSite.ts): the docs' layout and article styles
+   (src/docs/docs.css), plus a post's date and tags, its images and the index's
+   list of posts. */
+
+.blog-meta {
+  margin: 18px 0 0;
+  font: 700 var(--fs-14) / 1.4 var(--font-sans);
+  color: rgb(var(--c-ink) / 0.75);
+}
+.blog-audience {
+  margin: 10px 0 0;
+  max-width: 62ch;
+  font-size: var(--fs-16);
+  line-height: 1.5;
+  color: rgb(var(--c-ink) / 0.85);
+}
+.blog-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.blog-tags li {
+  padding: 2px 8px;
+  background: rgb(var(--c-lilac));
+  color: rgb(var(--c-on-accent));
+  border: var(--bw-1) solid rgb(var(--c-ink));
+  border-radius: var(--r-pill);
+  font: 700 var(--fs-12) / 1.5 var(--font-mono);
+}
+
+/* An image next to the post: a picture of what shipped (an SVG or a screenshot). */
+.blog-post .doc-body img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+  border: var(--bw-2) solid rgb(var(--c-ink));
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-sm);
+}
+.blog-post .doc-body > p:has(> img:only-child) {
+  margin-bottom: 1.6em;
+}
+
+/* ---------- the index ---------- */
+
+.blog-list {
+  display: grid;
+  gap: 20px;
+  max-width: var(--measure);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.blog-card {
+  position: relative;
+  padding: 20px 22px;
+  background: rgb(var(--c-surface));
+  border: var(--bw-2) solid rgb(var(--c-ink));
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-sm);
+  transition:
+    transform var(--d-spring) var(--e-spring),
+    box-shadow var(--d-2) var(--e-out);
+}
+.blog-card:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: var(--sh-md);
+}
+.blog-card .blog-meta {
+  margin: 0;
+}
+.blog-card__title {
+  margin: 8px 0 0;
+  font: 800 var(--fs-h3) / 1.2 var(--font-display);
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+.blog-card__title a {
+  color: rgb(var(--c-ink));
+  text-decoration: none;
+}
+/* The whole card is the link's target. */
+.blog-card__title a::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.blog-card__title a:focus-visible {
+  outline: none;
+}
+.blog-card:has(a:focus-visible) {
+  outline: 3px solid rgb(var(--c-blue));
+  outline-offset: 3px;
+}
+.blog-card__text {
+  margin: 8px 0 0;
+  line-height: 1.55;
+  color: rgb(var(--c-ink) / 0.85);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .blog-card,
+  .blog-card:hover {
+    transition: none;
+    transform: none;
+  }
+}

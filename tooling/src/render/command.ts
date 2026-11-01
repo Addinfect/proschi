@@ -1,17 +1,33 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import { displayPath, parseFile } from '../imports';
+import { analyze } from '../../../frontend/src/sim/analyze';
 import type { ParseResult } from '../proschi';
+import { applyView, idList, viewError, viewOverlay, type SystemsView } from '../terminal/systems';
 import { FORMATS, renderFiles, type RenderFormat } from './index';
 
-/** `proschi render`: parses `<file>`, refuses on errors, and writes the files of the chosen format. */
+/**
+ * `proschi render`: parses `<file>`, refuses on errors, and writes the files
+ * of the chosen format. Systems are drawn collapsed unless `--expand` opens
+ * them; `--focus` draws one system's team design alone.
+ */
 export async function renderCommand(args: string[], out: (s: string) => void, err: (s: string) => void, usage: string): Promise<number> {
   let dir = '.';
   let format: RenderFormat = 'svg';
   const files: string[] = [];
+  const expanded: string[] = [];
+  let focus: string | undefined;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (arg === '--out' || arg === '-o') {
+    if (arg === '--expand' || arg === '--focus') {
+      const value = args[++i];
+      if (!value || value.startsWith('-') || idList(value).length === 0) {
+        err(`Missing system id after ${arg}`);
+        return 2;
+      }
+      if (arg === '--expand') expanded.push(...idList(value));
+      else focus = value;
+    } else if (arg === '--out' || arg === '-o') {
       const value = args[++i];
       if (!value) {
         err(`Missing directory after ${arg}`);
@@ -52,7 +68,16 @@ export async function renderCommand(args: string[], out: (s: string) => void, er
     return 1;
   }
 
-  const rendered = await renderFiles(diagram, format, basename(file, extname(file)) || 'diagram');
+  const view: SystemsView = { ...(expanded.length ? { expanded } : {}), ...(focus !== undefined ? { focus } : {}) };
+  const refused = viewError(diagram, view);
+  if (refused) {
+    err(refused);
+    return 2;
+  }
+  // The system boxes show the simulation: each team's promise, and what it is sent against its headroom.
+  const analysis = diagram.systems?.length && diagram.traffic?.length ? analyze(diagram) : undefined;
+  const { systems, nodes } = viewOverlay(diagram, analysis, view);
+  const rendered = await renderFiles(applyView(diagram, view), format, basename(file, extname(file)) || 'diagram', { systems, nodes });
   mkdirSync(dir, { recursive: true });
   for (const f of rendered) {
     const path = join(dir, f.name);

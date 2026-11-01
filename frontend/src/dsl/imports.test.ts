@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { joinImportPath, mapResolver, parse } from './index';
+import { ImportError, isImportKey, parseRemoteSpec, resolveImportPath } from './imports';
 import { format } from './format';
 
 const infra = `title "Infra"
@@ -169,5 +170,87 @@ describe('joinImportPath', () => {
     const resolve = mapResolver({ 'infra.proschi': 'a', 'x/other.proschi': 'b', 'y/other.proschi': 'c' });
     expect(resolve('lib/infra.proschi', 'root.proschi')).toEqual({ path: 'infra.proschi', source: 'a' });
     expect(resolve('other.proschi', 'root.proschi')).toBeUndefined();
+  });
+});
+
+describe('import paths and remote sources', () => {
+  const reason = (from: string | undefined, path: string) => {
+    try {
+      resolveImportPath(from, path);
+    } catch (e) {
+      expect(e).toBeInstanceOf(ImportError);
+      expect((e as Error).name).toBe('ImportError');
+      return (e as Error).message;
+    }
+    return undefined;
+  };
+
+  it('refuses absolute paths and NUL characters', () => {
+    expect(reason('a.proschi', '/etc/passwd')).toMatch(/absolute path/);
+    expect(reason('a.proschi', '\\server\\share.proschi')).toMatch(/absolute path/);
+    expect(reason('a.proschi', 'C:/x.proschi')).toMatch(/absolute path/);
+    expect(reason('a.proschi', 'x\0.proschi')).toMatch(/NUL/);
+    expect(joinImportPath('a.proschi', '/etc/passwd')).toBeUndefined();
+    // Percent signs are literal file names, never decoded into '..'.
+    expect(joinImportPath('a.proschi', '%2e%2e/%2e%2e/etc/passwd')).toBe('%2e%2e/%2e%2e/etc/passwd');
+  });
+
+  it('parses git sources strictly', () => {
+    expect(parseRemoteSpec('git:github.com/acme/infra//shared/base.proschi@v1.2.0')).toEqual({
+      kind: 'git',
+      repo: 'github.com/acme/infra',
+      path: 'shared/base.proschi',
+      ref: 'v1.2.0',
+    });
+    expect(parseRemoteSpec('git:gitlab.com/group/sub/repo//a.proschi@feature/x')).toMatchObject({ repo: 'gitlab.com/group/sub/repo', ref: 'feature/x' });
+    expect(parseRemoteSpec('infra.proschi')).toBeUndefined();
+    expect(reason(undefined, 'git:github.com/acme/infra//../../etc/passwd@main')).toMatch(/without '..'/);
+    expect(reason(undefined, 'git:github.com/acme/infra//a.proschi@--upload-pack=touch /tmp/x')).toMatch(/whitespace/);
+    expect(reason(undefined, 'git:github.com/acme/infra//a.proschi@--upload-pack=x')).toMatch(/invalid ref/);
+    expect(reason(undefined, 'git:github.com/acme/infra//a.proschi@-x')).toMatch(/invalid ref/);
+    expect(reason(undefined, 'git:github.com/acme/infra//a.proschi@a..b')).toMatch(/invalid ref/);
+    expect(reason(undefined, 'git:github.com/acme/infra//a.proschi@main.lock')).toMatch(/invalid ref/);
+    expect(reason(undefined, 'git:-oProxyCommand=x/acme/infra//a.proschi@main')).toMatch(/invalid repository/);
+    expect(reason(undefined, 'git:github.com/acme//a.proschi@main')).toMatch(/invalid repository/);
+    expect(reason(undefined, 'git:github.com/acme/infra/a.proschi@main')).toMatch(/not a git source/);
+  });
+
+  it('accepts https only, without credentials', () => {
+    expect(resolveImportPath(undefined, 'https://example.com/a/b.proschi')).toBe('https://example.com/a/b.proschi');
+    expect(reason(undefined, 'http://example.com/a.proschi')).toMatch(/only https:\/\//);
+    expect(reason(undefined, 'https://user:token@example.com/a.proschi')).toMatch(/credentials/);
+    expect(reason(undefined, 'file:///etc/passwd')).toMatch(/not a supported import source/);
+    expect(reason(undefined, 'ftp://example.com/a.proschi')).toMatch(/not a supported/);
+  });
+
+  it('resolves relative imports within the same remote source', () => {
+    const git = 'git:github.com/acme/infra//shared/base.proschi@v1';
+    expect(resolveImportPath(git, 'nodes.proschi')).toBe('git:github.com/acme/infra//shared/nodes.proschi@v1');
+    expect(resolveImportPath(git, '../top.proschi')).toBe('git:github.com/acme/infra//top.proschi@v1');
+    expect(reason(git, '../../escape.proschi')).toMatch(/leaves the repository github.com\/acme\/infra/);
+    expect(reason(git, '/etc/passwd')).toMatch(/absolute/);
+    const https = 'https://example.com/lib/base.proschi';
+    expect(resolveImportPath(https, 'nodes.proschi')).toBe('https://example.com/lib/nodes.proschi');
+    expect(reason(https, '//evil.example/x.proschi')).toMatch(/absolute/);
+  });
+
+  it('tells which keys an imports map may hold', () => {
+    expect(isImportKey('teams/a.proschi')).toBe(true);
+    expect(isImportKey('../shared/base.proschi')).toBe(true);
+    expect(isImportKey('git:github.com/acme/infra//a.proschi@v1')).toBe(true);
+    expect(isImportKey('/etc/passwd')).toBe(false);
+    expect(isImportKey('http://example.com/a.proschi')).toBe(false);
+  });
+
+  it('matches bundled remote files only by their exact spec', () => {
+    const spec = 'git:github.com/acme/infra//base.proschi@v1';
+    const files = { [spec]: 'import "nodes.proschi"\napi -> db', 'git:github.com/acme/infra//nodes.proschi@v1': 'api [REST API]\ndb [Redis]', 'base.proschi': 'x [Redis]' };
+    const { diagram, diagnostics } = parse(`import "${spec}"`, { path: 'root.proschi', resolve: mapResolver(files) });
+    expect(diagnostics).toEqual([]);
+    expect(diagram.nodes.map((n) => n.id)).toEqual(['api', 'db']);
+    // A missing remote file never falls back to a local file of the same name.
+    const missing = parse('import "git:github.com/other/repo//base.proschi@v1"', { path: 'root.proschi', resolve: mapResolver(files) });
+    expect(missing.diagnostics).toHaveLength(1);
+    expect(missing.diagnostics[0].severity).toBe('error');
   });
 });

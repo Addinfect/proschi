@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { ExternalLink, X } from 'lucide-react';
 import { highlightLines, type TokenClass } from '../landing/highlight';
 import { ARROWS, CHEAT_SECTIONS } from './cheatSheetSections';
-import { LANGUAGE_URL, MODEL_URL } from './links';
+import { DOCS_URL, LANGUAGE_URL, MODEL_URL } from './links';
 
 const TOKEN_CLASS: Record<TokenClass, string> = {
   keyword: 'text-purple-700 dark:text-purple-300',
@@ -110,7 +110,7 @@ export default function CheatSheet({ onClose }: { onClose: () => void }) {
             <h3 className="flex items-baseline gap-2 font-medium text-ink">
               {section.title}
               <a
-                href={`${LANGUAGE_URL}${section.ref}`}
+                href={`${DOCS_URL}${section.ref}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-xs font-normal text-pop-blue hover:underline"

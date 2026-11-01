@@ -1,5 +1,5 @@
 // Kept apart from command.ts so the CLI can print its usage without loading the renderer.
-export const RENDER_USAGE = `  proschi render [--out <dir>] [--format svg|md|html|hld-md|hld-html] <file>`;
+export const RENDER_USAGE = `  proschi render [--out <dir>] [--format svg|md|html|hld-md|hld-html] [--expand <id>[,<id>…]] [--focus <id>] <file>`;
 
 export const RENDER_HELP = `render  Writes the diagram as static files into --out (default: the current
         directory). svg (default): architecture.svg and <usecase>--<scenario>.svg
@@ -7,4 +7,8 @@ export const RENDER_HELP = `render  Writes the diagram as static files into --ou
         the SVGs; hld-md / hld-html: <file>.hld.md / <file>.hld.html, the
         high-level design document (overview, requirements, capacity,
         components, data model, APIs, scenarios, decisions, risks).
+        Systems are drawn as one box each, with the team's promise and what
+        they are sent against their headroom; --expand opens them in place
+        (orders.warehouse names one inside another), --focus draws one
+        system's design alone. An id that names no system exits with 2.
         Refuses (exit 1) when the document has errors.`;

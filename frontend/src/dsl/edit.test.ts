@@ -37,6 +37,13 @@ describe('setNodePosition', () => {
     expect(parse(moved).diagram.nodes[0].position).toEqual({ x: 5, y: 6 });
   });
 
+  it('puts system positions before the brace', () => {
+    const src = 'system orders "Orders" @Orders {\n  expose api\n}';
+    const moved = setNodePosition(src, 'orders', { x: 5, y: 6 });
+    expect(moved).toBe('system orders "Orders" @Orders pos 5,6 {\n  expose api\n}');
+    expect(parse(moved).diagram.nodes[0].position).toEqual({ x: 5, y: 6 });
+  });
+
   it('edits indented nodes inside groups', () => {
     expect(setNodePosition('group g {\n  svc [Redis]\n}', 'svc', { x: 1, y: 2 })).toBe('group g {\n  svc [Redis] pos 1,2\n}');
   });
@@ -109,6 +116,10 @@ describe('removeConnections', () => {
 });
 
 describe('removeNode', () => {
+  it('leaves a system block to the text', () => {
+    expect(removeNode('system orders "Orders" {\n  expose api\n}', 'orders')).toEqual({ error: '"Orders" is a system; delete its block in the text.' });
+  });
+
   it('removes the declaration and its connections', () => {
     const result = removeNode('a [Redis] # cache\nb\na -> b\nb -> c', 'a');
     expect(result).toEqual({ source: 'b\nb -> c' });

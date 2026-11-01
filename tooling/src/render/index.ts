@@ -5,7 +5,7 @@
  * `hld-md` and `hld-html` write the high-level design document instead.
  */
 import { EXPORT_CSP, toMermaidArchitecture, toMermaidSequence, type Diagram, type DiagramScenario, type DiagramUseCase } from '../proschi';
-import { renderArchitectureSvg } from './architecture';
+import { renderArchitectureSvg, type ArchitectureOptions } from './architecture';
 import { renderSequenceSvg, scenarioTitle } from './sequence';
 import { renderHldHtml, renderHldMarkdown } from './hld';
 import { esc } from './svg';
@@ -43,8 +43,8 @@ export function scenarioSlug(useCase: DiagramUseCase, scenario: DiagramScenario)
  * Every SVG of a diagram. With `inline`, ids inside each SVG get a unique
  * prefix so several can share one HTML page.
  */
-export async function renderSvgs(diagram: Diagram, inline = false): Promise<RenderedDiagram> {
-  const architecture = await renderArchitectureSvg(diagram);
+export async function renderSvgs(diagram: Diagram, inline = false, options: ArchitectureOptions = {}): Promise<RenderedDiagram> {
+  const architecture = await renderArchitectureSvg(diagram, options);
   let n = 0;
   const scenarios = diagram.useCases.flatMap((useCase) =>
     useCase.scenarios.map((scenario) => ({
@@ -139,11 +139,11 @@ export function renderHtml(diagram: Diagram, rendered: RenderedDiagram): string 
 }
 
 /** The files `proschi render` writes for `format`; `baseName` names the single md/html file. */
-export async function renderFiles(diagram: Diagram, format: RenderFormat, baseName: string): Promise<RenderedFile[]> {
+export async function renderFiles(diagram: Diagram, format: RenderFormat, baseName: string, options: ArchitectureOptions = {}): Promise<RenderedFile[]> {
   if (format === 'md') return [{ name: `${baseName}.md`, content: renderMarkdown(diagram) }];
-  if (format === 'html') return [{ name: `${baseName}.html`, content: renderHtml(diagram, await renderSvgs(diagram, true)) }];
+  if (format === 'html') return [{ name: `${baseName}.html`, content: renderHtml(diagram, await renderSvgs(diagram, true, options)) }];
   if (format === 'hld-md') return [{ name: `${baseName}.hld.md`, content: renderHldMarkdown(diagram) }];
-  if (format === 'hld-html') return [{ name: `${baseName}.hld.html`, content: renderHldHtml(diagram, await renderSvgs(diagram, true)) }];
-  const { architecture, scenarios } = await renderSvgs(diagram);
+  if (format === 'hld-html') return [{ name: `${baseName}.hld.html`, content: renderHldHtml(diagram, await renderSvgs(diagram, true, options)) }];
+  const { architecture, scenarios } = await renderSvgs(diagram, false, options);
   return [{ name: 'architecture.svg', content: `${architecture}\n` }, ...scenarios.map((s) => ({ name: `${s.slug}.svg`, content: `${s.svg}\n` }))];
 }

@@ -16,6 +16,8 @@ import {
 } from '../../dsl/edit';
 import type { CapacityOverride, DiagramEdge, DiagramNode, InstanceSize } from '../../dsl/types';
 import { eyebrow, field, iconButton } from '../Playground/ui';
+import type { SystemSummary } from '../Canvas/systemSummary';
+import { formatRps } from '../../sim';
 
 type Edit = (source: string) => string;
 
@@ -26,6 +28,8 @@ interface InspectorProps {
   capacity?: CapacityOverride;
   /** The file a node or connection is declared in, when it is not this document: it is then read-only here. */
   importedFrom?: string;
+  /** What the simulation says about a system box: its contract and the load it is sent. */
+  system?: SystemSummary;
   /** Applies a text edit to the document. */
   onEdit: (edit: Edit) => void;
   /** Deletes the node or connection from the text. */
@@ -47,7 +51,7 @@ const CAPACITY_ROWS: { part: CapacityPart; label: string; unit: string; storeOnl
  * The settings of the selected node or connection. Every change is a small
  * edit of the text, which stays the source of truth.
  */
-export default function Inspector({ node, edge, capacity, importedFrom, onEdit, onDelete, onClose }: InspectorProps) {
+export default function Inspector({ node, edge, capacity, importedFrom, system, onEdit, onDelete, onClose }: InspectorProps) {
   const title = node ? node.name : edge ? `${edge.source} → ${edge.target}` : '';
   const readOnly = importedFrom !== undefined;
   return (
@@ -73,7 +77,11 @@ export default function Inspector({ node, edge, capacity, importedFrom, onEdit, 
       </div>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
         {readOnly && <p className="text-xs text-muted">Declared in {importedFrom}; edit it there.</p>}
-        {node && <NodeFields node={node} capacity={capacity} readOnly={readOnly} onEdit={onEdit} />}
+        {node && node.kind === 'system' ? (
+          <SystemFields node={node} system={system} readOnly={readOnly} onEdit={onEdit} />
+        ) : (
+          node && <NodeFields node={node} capacity={capacity} readOnly={readOnly} onEdit={onEdit} />
+        )}
         {edge && (
           <TextField
             label="Label"
@@ -179,6 +187,57 @@ function NodeFields({ node, capacity, readOnly, onEdit }: { node: DiagramNode; c
             );
           })}
         </fieldset>
+      )}
+    </>
+  );
+}
+
+/** A system box: its name, and what its team promises and what it is sent (its own settings are in its block in the text). */
+function SystemFields({ node, system: s, readOnly, onEdit }: { node: DiagramNode; system?: SystemSummary; readOnly: boolean; onEdit: (edit: Edit) => void }) {
+  return (
+    <>
+      <p className="font-mono text-xs text-muted">
+        system: {node.id}
+        {node.ownerTeam ? ` · @${node.ownerTeam}` : ''}
+      </p>
+      <TextField
+        label="Name"
+        value={node.name}
+        disabled={readOnly}
+        onCommit={(name) => {
+          if (!name) return false;
+          onEdit((src) => renameNode(src, node.id, name));
+        }}
+      />
+      {s && (
+        <section aria-label="Contract" className="space-y-2 border-t border-ink/15 pt-3 text-sm">
+          <p>
+            <span className={eyebrow}>Status</span>{' '}
+            <span className={`font-bold ${s.status === 'over' ? 'text-red-700 dark:text-red-300' : s.status === 'hot' ? 'text-amber-800 dark:text-amber-200' : 'text-ink'}`}>{s.label}</span>
+          </p>
+          <p className="text-xs text-muted">{s.linked ? `Design: ${s.file ?? 'linked'}` : s.stub ? 'Declared, no design linked: its capacity { … } is the contract.' : 'Declared, no design linked and no capacity: not simulated.'}</p>
+          {s.promise && (
+            <p>
+              <span className={eyebrow}>Promise</span> <span className="font-mono text-xs">{s.promise}</span>
+            </p>
+          )}
+          {s.ports.length > 0 && (
+            <ul className="space-y-1">
+              {s.ports.map((p) => (
+                <li key={p.id} className="font-mono text-xs">
+                  <span className="font-bold">→ {p.id}</span>
+                  {p.useCase ? ` "${p.useCase}"` : ''}: {formatRps(p.sentRps)} sent, takes {Number.isFinite(p.limitRps) ? `${formatRps(p.limitRps)} more` : 'any load'}
+                </li>
+              ))}
+            </ul>
+          )}
+          {s.warnings.map((w) => (
+            <p key={w} className="rounded bg-amber-50 px-2 py-1 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+              {w}
+            </p>
+          ))}
+          {s.hint && <p className="text-xs font-bold text-ink">{s.hint}</p>}
+        </section>
       )}
     </>
   );

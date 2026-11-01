@@ -10,6 +10,9 @@
       "include": "#comment"
     },
     {
+      "include": "#system"
+    },
+    {
       "include": "#section"
     },
     {
@@ -513,6 +516,93 @@
         },
         {
           "include": "#identifier"
+        }
+      ]
+    },
+    "system": {
+      "comment": "`system id \"Name\" @Team { … }`: a team's design behind a contract. Inside it, `from \"path\"`, `expose id \"Name\" -> \"Use case\"` and `capacity { … }`.",
+      "name": "meta.block.system.proschi",
+      "begin": "^\\s*(system)\\s+([A-Za-z_][A-Za-z0-9_]*)(?=[^#]*\\{\\s*(?:#.*)?$)",
+      "end": "^\\s*(\\})",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.control.proschi"
+        },
+        "2": {
+          "name": "variable.other.node.proschi"
+        }
+      },
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.section.block.end.proschi"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#comment"
+        },
+        {
+          "include": "#section"
+        },
+        {
+          "match": "^\\s*(from)\\b(?:\\s+(\")([^\"]*)(\")?)?",
+          "captures": {
+            "1": {
+              "name": "keyword.control.import.proschi"
+            },
+            "2": {
+              "name": "punctuation.definition.string.begin.proschi"
+            },
+            "3": {
+              "name": "string.quoted.double.path.proschi"
+            },
+            "4": {
+              "name": "punctuation.definition.string.end.proschi"
+            }
+          }
+        },
+        {
+          "match": "^\\s*(expose)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.control.proschi"
+            },
+            "2": {
+              "name": "variable.other.node.proschi"
+            }
+          }
+        },
+        {
+          "match": "^\\s*(capacity)(?=\\s*\\{)",
+          "captures": {
+            "1": {
+              "name": "keyword.control.proschi"
+            }
+          }
+        },
+        {
+          "include": "#section-keyword"
+        },
+        {
+          "include": "#quantity"
+        },
+        {
+          "include": "#string"
+        },
+        {
+          "include": "#team"
+        },
+        {
+          "include": "#style"
+        },
+        {
+          "include": "#position"
+        },
+        {
+          "include": "#arrow"
+        },
+        {
+          "include": "#brace"
         }
       ]
     }

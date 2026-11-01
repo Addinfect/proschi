@@ -2,7 +2,7 @@
  * The syntax cheat-sheet in the Help menu. Read top to bottom, its snippets
  * form one valid document: cheatSheetSections.test.ts parses them together with the
  * real parser (no errors, no warnings) and checks the arrows and the links
- * against docs/LANGUAGE.md, so the sheet cannot drift from the language.
+ * against the docs pages, so the sheet cannot drift from the language.
  */
 
 export interface CheatSection {
@@ -11,11 +11,11 @@ export interface CheatSection {
   /** One line under the title; `backticks` render as code. */
   note: string;
   code: string;
-  /** Anchor of the section in docs/LANGUAGE.md. */
+  /** The docs page (and anchor) that explains it, relative to /docs/: `use-cases/`, `tests/#tests`. */
   ref: string;
 }
 
-/** Use case arrows, as in LANGUAGE.md's grammar (`arrow = …`). */
+/** Use case arrows, as in docs/GRAMMAR.md (`arrow = …`). */
 export const ARROWS: { arrow: string; meaning: string }[] = [
   { arrow: '->', meaning: 'request' },
   { arrow: '-->', meaning: 'response' },
@@ -28,7 +28,7 @@ export const CHEAT_SECTIONS: CheatSection[] = [
     id: 'nodes',
     title: 'Nodes',
     note: '`id "Name" [Tech] @team x<replicas>`, parts in any order. `[Tech]` is one of about 210 catalog techs, aliases too (`[S3]`, `[Postgres]`). Undeclared ids become plain nodes.',
-    ref: '#statements',
+    ref: 'nodes/#declare-a-node',
     code: `title "Shop" "Sells things online"
 
 user "User"       [Actor]
@@ -39,7 +39,7 @@ db   "Orders DB"  [PostgreSQL]`,
     id: 'groups',
     title: 'Groups',
     note: 'A box around nodes: a VPC, a team, a zone.',
-    ref: '#statements',
+    ref: 'nodes/#frame-nodes-with-a-group',
     code: `group vpc "VPC" {
   cache "Cache" [Redis]
 }`,
@@ -48,7 +48,7 @@ db   "Orders DB"  [PostgreSQL]`,
     id: 'connections',
     title: 'Connections',
     note: '`from -> to : label`. Use case steps follow these edges.',
-    ref: '#statements',
+    ref: 'nodes/#connect-two-nodes',
     code: `user -> api   : HTTPS
 api  -> cache : GET
 api  -> db    : SQL`,
@@ -57,7 +57,7 @@ api  -> db    : SQL`,
     id: 'usecases',
     title: 'Use cases',
     note: 'Steps play in order. `METHOD /path`, then a JSON body; a response starts with its status. `par { … }` runs steps in parallel.',
-    ref: '#use-case-steps',
+    ref: 'use-cases/',
     code: `usecase "Place order" {
   user -> api : POST /orders json {"sku": "A1"}
   par {
@@ -71,7 +71,7 @@ api  -> db    : SQL`,
     id: 'scenarios',
     title: 'Scenarios',
     note: 'Each `alt` branch is a scenario tab: the happy path and the failures side by side.',
-    ref: '#scenarios',
+    ref: 'scenarios/',
     code: `usecase "Get order" {
   user -> api : GET /orders/{id}
   alt "Cache hit" when "seen recently" {
@@ -92,7 +92,7 @@ api  -> db    : SQL`,
     id: 'hld',
     title: 'Traffic and requirements',
     note: 'The simulation loads the design with this traffic and checks every requirement (the Results tab). `capacity` overrides a node\'s numbers, e.g. how long a failed call to it takes.',
-    ref: '#high-level-design',
+    ref: 'hld/',
     code: `traffic {
   "Get order"   2k rps mix "Cache hit" 90%, "Cache miss" 10%
   "Place order" 50 rps
@@ -113,7 +113,7 @@ capacity {
     id: 'tests',
     title: 'Tests',
     note: 'Assertions about how the flows work.',
-    ref: '#tests',
+    ref: 'tests/#tests',
     code: `test "Reads try the cache first" {
   "Get order" calls any cache before any database
   "Place order" writes any database before responding

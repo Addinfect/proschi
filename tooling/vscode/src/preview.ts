@@ -116,7 +116,7 @@ export class PreviewPanel {
 function parseOptions(document: vscode.TextDocument) {
   if (document.uri.scheme !== 'file') return undefined;
   const open = (path: string) => vscode.workspace.textDocuments.find((d) => d.uri.scheme === 'file' && d.uri.fsPath === path)?.getText();
-  return { path: document.uri.fsPath, resolve: fileResolver(open) };
+  return { path: document.uri.fsPath, resolve: fileResolver({ entry: document.uri.fsPath, read: open }) };
 }
 
 export function registerPreview(context: vscode.ExtensionContext) {

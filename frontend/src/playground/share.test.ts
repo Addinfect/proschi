@@ -79,6 +79,12 @@ describe('imported files in links', () => {
     expect(decodeShareLink(`${code}&imports=${encodeShareHash('[1,2]').slice(6)}`)).toEqual({ source: 'x' });
   });
 
+  it('drops imported files under keys no import resolves to', () => {
+    const imports = { 'ok.proschi': 'a', '/etc/passwd': 'b', 'http://example.com/x.proschi': 'c', 'git:github.com/acme/infra//x.proschi@v1': 'd' };
+    expect(decodeShareLink(encodeShareHash('x', undefined, imports))?.imports).toEqual({ 'ok.proschi': 'a', 'git:github.com/acme/infra//x.proschi@v1': 'd' });
+    expect(decodeShareLink(encodeShareHash('x', undefined, { '/etc/passwd': 'b' }))).toEqual({ source: 'x' });
+  });
+
   it('keeps links made before imports existed working', () => {
     // A link in the format the editor wrote before imports existed.
     const old = '#code=IYAgtAfCBGQ&uc=log-in&alt=db-down&step=3';

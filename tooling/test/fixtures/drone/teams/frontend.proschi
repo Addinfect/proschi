@@ -1,0 +1,27 @@
+title "Frontend"
+direction right
+gateway [AWS API Gateway] x2
+api [REST API] x10
+db [PostgreSQL] x6
+gateway -> api
+api -> db
+svc1 [Service] x2
+cache1 [Redis]
+api -> svc1
+svc1 -> cache1
+usecase "Open shop" {
+  gateway -> api : POST /open-shop
+  api -> db : SELECT row
+  api --> gateway : 201
+}
+usecase "Background" {
+  api -> svc1 : refresh
+  svc1 -> cache1 : GET key
+}
+traffic {
+  "Open shop" 2000 rps
+  "Background" 100 rps
+}
+requirements {
+  p99 "Open shop" < 300ms
+}

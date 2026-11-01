@@ -20,6 +20,7 @@ import type {
   DiagramNode,
   DiagramScenario,
   DiagramStep,
+  DiagramSystem,
   DiagramUseCase,
   Dash,
   ElementStyle,
@@ -38,6 +39,8 @@ import type {
   ResolvedImport,
   Selector,
   SourceLoc,
+  SystemEntry,
+  SystemStub,
   TrafficEntry,
 } from './types';
 
@@ -76,6 +79,8 @@ interface Container {
 interface Reference {
   id: string;
   loc: SourceLoc;
+  /** The target of an architecture connection: `b.planned` there is a tag when `b` is not a system. */
+  edgeTarget?: DiagramEdge;
 }
 
 type Frame =
@@ -83,7 +88,26 @@ type Frame =
   | { kind: 'usecase'; useCase: DiagramUseCase; body: Container; parCount: number; loc: SourceLoc }
   | { kind: 'alt'; name: string; body: Container; owner: Container; set: Item & { kind: 'alt' }; loc: SourceLoc }
   | { kind: 'par'; group: number; loc: SourceLoc }
+  | SystemFrame
+  | StubFrame
   | SectionFrame;
+
+/** A multi-line `capacity {` inside a system. */
+interface StubFrame {
+  kind: 'stub';
+  system: DiagramSystem;
+  loc: SourceLoc;
+}
+
+/** A `system … {` block: its `from`, `expose` and `capacity` lines. */
+interface SystemFrame {
+  kind: 'system';
+  system: DiagramSystem;
+  fromLoc?: SourceLoc;
+  /** Where each entry's `-> "Use case"` is written. */
+  useCaseLocs: Map<SystemEntry, SourceLoc>;
+  loc: SourceLoc;
+}
 
 /** The top-level blocks of docs/design/hld-and-practice.md §1, whose lines are read by their own rules. */
 type Section = 'traffic' | 'requirements' | 'capacity' | 'entity' | 'decision' | 'test' | 'legend';
@@ -106,6 +130,9 @@ interface SectionFrame {
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
 const DEFAULT_TECH: TechStack = 'Rectangle';
 const DEFAULT_GROUP_TECH: TechStack = 'Logical Group';
+/** What a collapsed system is drawn as until a renderer knows the `system` kind. */
+const SYSTEM_TECH: TechStack = 'Service';
+const STUB_HELP = 'a rate, p99, latency or availability, e.g. capacity { 2k rps p99 150ms availability 99.95% }';
 /** Nested or repeated alt sets multiply; past this many scenarios the rest are dropped. */
 export const MAX_SCENARIOS = 32;
 /**
@@ -179,6 +206,14 @@ export function parse(source: string, options: ParseOptions = {}): ParseResult {
   return new Parser(source, options).run();
 }
 
+/** Shared by the parser of a root document and the parsers of its systems' team files. */
+interface Scope {
+  /** Files being read, outermost first, to find import and system cycles; ends with the team file. */
+  chain: (string | undefined)[];
+  /** Team files parsed so far, by resolved path, so a file used by several systems is parsed once. */
+  teamFiles: Map<string, ParseResult>;
+}
+
 class Parser {
   // Per-file state, swapped while an imported file is read.
   private lines: string[];
@@ -201,7 +236,12 @@ class Parser {
   /** Files being read, outermost first, to find import cycles. */
   private readonly chain: (string | undefined)[];
   /** Diagnostics are sorted by file in the order the files were first read, the root first. */
-  private readonly fileOrder = new Map<string | undefined, number>([[undefined, 0]]);
+  private readonly fileOrder: Map<string | undefined, number>;
+  /** The file read as the root: undefined for a document, the path for a system's team file (its own scope). */
+  private readonly rootFile?: string;
+  private readonly teamFiles: Map<string, ParseResult>;
+  private readonly systems: DiagramSystem[] = [];
+  private readonly systemById = new Map<string, DiagramSystem>();
   /** `a|b` for every connection, both directions; filled before use cases are built. */
   private readonly connected = new Set<string>();
   private title?: string;
@@ -224,10 +264,14 @@ class Parser {
   private built: DiagramUseCase[] = [];
   private readonly options: ParseOptions;
 
-  constructor(source: string, options: ParseOptions) {
+  constructor(source: string, options: ParseOptions, scope?: Scope) {
     this.options = options;
     this.lines = source.split('\n');
-    this.chain = [options.path];
+    this.chain = scope ? scope.chain : [options.path];
+    this.teamFiles = scope?.teamFiles ?? new Map();
+    // A team file is read as a root of its own, but its locations carry its path.
+    if (scope) this.rootFile = this.file = options.path;
+    this.fileOrder = new Map([[this.rootFile, 0]]);
     if (options.path !== undefined) this.included.add(options.path);
   }
 
@@ -235,6 +279,7 @@ class Parser {
     // Implicit nodes are created only once every file is read, so a use case
     // file may refer to nodes its imports declare.
     this.parseFile();
+    this.resolvePorts();
     this.createImplicitNodes();
     this.resolveTags();
     // Connections from every file count, so a use case file may rely on its imports' connections.
@@ -261,6 +306,7 @@ class Parser {
       ...(this.tests.length ? { tests: this.tests } : {}),
       ...(this.legend.length ? { legend: this.legend } : {}),
       ...(Object.keys(this.layout).length ? { layout: this.layout } : {}),
+      ...(this.systems.length ? { systems: this.systems } : {}),
     };
 
     const order = (d: Diagnostic) => this.fileOrder.get(d.file) ?? 0;
@@ -289,15 +335,21 @@ class Parser {
               ? `alt '${frame.name}'`
               : frame.kind === 'par'
                 ? 'par block'
-                : sectionName(frame);
+                : frame.kind === 'system'
+                  ? `system '${frame.system.id}'`
+                  : frame.kind === 'stub'
+                    ? `the capacity of system '${frame.system.id}'`
+                    : sectionName(frame);
       this.error(`Missing } to close ${what}`, frame.loc);
+      if (frame.kind === 'system') this.finishSystem(frame);
     }
   }
 
   /** Parses the line at `index` and returns the index of the last line it consumed. */
   private parseLine(index: number): number {
     const line = index + 1;
-    const { tokens, diagnostics } = tokenizeLine(this.lines[index], line);
+    const { tokens: lexed, diagnostics } = tokenizeLine(this.lines[index], line);
+    const tokens = qualify(lexed);
     this.diagnostics.push(...diagnostics.map((d) => ({ ...d, ...this.fileField() })));
     // A line the lexer could not read is skipped rather than half-interpreted.
     if (tokens.length === 0 || diagnostics.some((d) => d.severity === 'error')) return index;
@@ -323,11 +375,16 @@ class Parser {
       if (first.kind === 'rbrace') {
         this.stack.pop();
         if (!top.discard) this.closeSection(top);
-        if (!top.discard && this.file === undefined) this.blocks.push({ kind: top.section, start: top.loc.line, end: line });
+        if (!top.discard && this.file === this.rootFile) this.blocks.push({ kind: top.section, start: top.loc.line, end: line });
         if (second) this.error('Unexpected input after }', loc(second));
       } else if (!top.discard) {
         this.parseSectionLine(top, tokens, line);
       }
+      return index;
+    }
+
+    if (top?.kind === 'system' || top?.kind === 'stub') {
+      this.parseSystemLine(top, tokens, line);
       return index;
     }
 
@@ -355,6 +412,11 @@ class Parser {
         break;
       case 'group':
         this.parseGroup(tokens, line);
+        break;
+      // A keyword only as `system id … {`, so a node may still be called system.
+      case 'system':
+        if (second?.kind === 'ident' && tokens[tokens.length - 1].kind === 'lbrace') this.parseSystem(tokens, line);
+        else this.parseNode(tokens, line);
         break;
       case 'usecase':
         this.parseUseCase(tokens, line);
@@ -412,7 +474,7 @@ class Parser {
     }
     const summary = tokens[2]?.kind === 'string' ? tokens[2] : undefined;
     // The root document names the diagram; titles of imported files are ignored.
-    if (this.file === undefined) {
+    if (this.file === this.rootFile) {
       this.title = value.value;
       if (summary) this.summary = summary.value;
     }
@@ -447,7 +509,7 @@ class Parser {
       return;
     }
     // Like title, an imported file's direction is ignored: the root document lays out the diagram.
-    if (this.file !== undefined) return;
+    if (this.file !== this.rootFile) return;
     if (this.layoutLocs.direction) {
       this.warning(`direction is already set ${this.where(this.layoutLocs.direction, loc)}; this one is ignored`, this.locOf(keyword, line));
       return;
@@ -468,7 +530,7 @@ class Parser {
       this.error('layout ordered applies to the whole diagram; write it at the top level', this.locOf(keyword, line));
       return;
     }
-    if (this.file !== undefined) return;
+    if (this.file !== this.rootFile) return;
     if (this.layoutLocs.ordered) {
       this.warning(`layout ordered is already set ${this.where(this.layoutLocs.ordered, loc)}`, this.locOf(keyword, line));
       return;
@@ -527,16 +589,8 @@ class Parser {
       this.warning(`Imports are not resolved in this context; '${path}' was not loaded`, loc);
       return;
     }
-    let target: ResolvedImport | undefined;
-    try {
-      target = resolve(path, this.file ?? this.options.path);
-    } catch {
-      target = undefined;
-    }
-    if (!target) {
-      this.error(`Cannot find '${path}'`, loc);
-      return;
-    }
+    const target = this.resolveFile(path, loc);
+    if (!target) return;
     entry.resolved = target.path;
 
     const cycleStart = this.chain.indexOf(target.path);
@@ -558,6 +612,26 @@ class Parser {
     this.parseFile();
     this.chain.pop();
     ({ lines: this.lines, file: this.file, stack: this.stack } = outer);
+  }
+
+  /**
+   * Loads `path` through the resolver, relative to the file being read. A
+   * resolver error named `ImportError` (outside the project root, not synced,
+   * …) is reported with its own message; anything else is "Cannot find".
+   */
+  private resolveFile(path: string, loc: SourceLoc): ResolvedImport | undefined {
+    let target: ResolvedImport | undefined;
+    try {
+      target = this.options.resolve?.(path, this.file ?? this.options.path);
+    } catch (e) {
+      if (e instanceof Error && e.name === 'ImportError') {
+        this.error(e.message, loc);
+        return undefined;
+      }
+      target = undefined;
+    }
+    if (!target) this.error(`Cannot find '${path}'`, loc);
+    return target;
   }
 
   private parseGroup(tokens: Token[], line: number) {
@@ -622,6 +696,286 @@ class Parser {
     this.applyStyle(group, style);
     this.addNode(group);
     this.stack.push({ kind: 'group', id: idToken.value, loc });
+  }
+
+  // ---- Systems: a team's design behind a contract (docs/design/team-systems-and-imports.md) ----
+
+  /** `system id ["Name"] [@team] [pos x,y] [color c] [.tag] [rank N] {` */
+  private parseSystem(tokens: Token[], line: number) {
+    const [keyword, idToken] = tokens;
+    const top = this.top();
+    if (top && top.kind !== 'group') {
+      this.error('A system is declared at the top level or inside a group', this.locOf(keyword, line));
+      this.skipSection('test', tokens, line);
+      return;
+    }
+    const loc = this.locOf(idToken, line);
+    const node: DiagramNode = { id: idToken.value, kind: 'system', name: idToken.value, type: 'service', techStack: SYSTEM_TECH, parent: this.currentGroup(), loc };
+    const style: StyleParts = {};
+    let named = false;
+    let i = 2;
+    while (i < tokens.length - 1) {
+      const t = tokens[i];
+      const styleUsed = this.readStylePart(tokens, i, line, style, false);
+      const used = styleUsed === 0 ? this.readRank(tokens, i, line, node) : styleUsed;
+      if (used === undefined) return this.skipSection('test', tokens, line);
+      if (used > 0) {
+        i += used;
+        continue;
+      }
+      if (t.kind === 'string' && !named) {
+        node.name = t.value;
+        named = true;
+      } else if (t.kind === 'string' && node.description === undefined) {
+        node.description = t.value;
+      } else if (t.kind === 'team') {
+        node.ownerTeam = t.value;
+      } else if (isWord(t, 'pos')) {
+        const [x, comma, y] = [tokens[i + 1], tokens[i + 2], tokens[i + 3]];
+        if (x?.kind !== 'number' || comma?.kind !== 'comma' || y?.kind !== 'number') {
+          this.error('Expected pos x,y', this.locOf(t, line));
+          return this.skipSection('test', tokens, line);
+        }
+        node.position = { x: Number(x.value), y: Number(y.value) };
+        i += 3;
+      } else {
+        this.error(`Unexpected ${describe(t)} in system header; write system id "Name" @Team {`, this.locOf(t, line));
+        return this.skipSection('test', tokens, line);
+      }
+      i++;
+    }
+    this.applyStyle(node, style);
+    const system: DiagramSystem = { id: node.id, entries: [], loc };
+    if (!this.nodes.has(node.id)) {
+      this.systems.push(system);
+      this.systemById.set(system.id, system);
+    }
+    this.addNode(node);
+    this.stack.push({ kind: 'system', system, useCaseLocs: new Map(), loc });
+  }
+
+  /** A line inside `system … { }` or its multi-line `capacity { }`. */
+  private parseSystemLine(frame: SystemFrame | StubFrame, tokens: Token[], line: number) {
+    const [first, second] = tokens;
+    const { system } = frame;
+    if (first.kind === 'rbrace') {
+      this.stack.pop();
+      if (frame.kind === 'system') this.finishSystem(frame);
+      if (second) this.error('Unexpected input after }', this.locOf(second, line));
+      return;
+    }
+    if (frame.kind === 'stub') {
+      this.readStub(system.stub!, tokens, 0, tokens.length, line);
+      return;
+    }
+    if (isWord(first, 'from')) {
+      if (second?.kind !== 'string' || !second.value.trim()) {
+        this.error('Expected the team file, e.g. from "teams/orders.proschi"', this.locOf(second ?? first, line));
+        return;
+      }
+      if (system.from !== undefined) {
+        this.error(`System '${system.id}' already has from "${system.from}"`, this.locOf(first, line));
+        return;
+      }
+      this.expectEnd(tokens, 2, line);
+      system.from = second.value;
+      frame.fromLoc = this.locOf(second, line);
+      return;
+    }
+    if (isWord(first, 'expose')) return this.parseExpose(frame, tokens, line);
+    if (isWord(first, 'capacity') && second?.kind === 'lbrace') {
+      const opens = tokens[tokens.length - 1].kind !== 'rbrace';
+      if (system.stub) {
+        this.error(`System '${system.id}' already has a capacity`, this.locOf(first, line));
+        if (opens) this.stack.push({ kind: 'section', section: 'capacity', discard: true, loc: this.locOf(first, line) });
+        return;
+      }
+      const stub: SystemStub = { loc: this.lineLoc(tokens, line) };
+      system.stub = stub;
+      this.readStub(stub, tokens, 2, opens ? tokens.length : tokens.length - 1, line);
+      if (opens) this.stack.push({ kind: 'stub', system, loc: this.locOf(first, line) });
+      return;
+    }
+    this.error('Inside a system, write from "file", expose <id> "Name" -> "Use case" or capacity { … }', this.locOf(first, line));
+    if (tokens[tokens.length - 1].kind === 'lbrace') this.stack.push({ kind: 'section', section: 'test', discard: true, loc: this.locOf(first, line) });
+  }
+
+  /** `expose id ["Name"] [-> "Use case"]` */
+  private parseExpose(frame: SystemFrame, tokens: Token[], line: number) {
+    const [keyword, idToken] = tokens;
+    if (idToken?.kind !== 'ident') {
+      this.error('Expected an entry point id, e.g. expose api "Orders API" -> "Place order"', this.locOf(idToken ?? keyword, line));
+      return;
+    }
+    const entry: SystemEntry = { id: idToken.value, name: idToken.value, loc: this.locOf(idToken, line) };
+    let i = 2;
+    if (tokens[i]?.kind === 'string') entry.name = tokens[i++].value;
+    if (tokens[i]?.kind === 'arrow') {
+      const useCase = tokens[i + 1];
+      if (tokens[i].value !== '->' || (useCase?.kind !== 'string' && useCase?.kind !== 'ident')) {
+        this.error('Expected -> "Use case" after the entry point', this.locOf(useCase ?? tokens[i], line));
+        return;
+      }
+      entry.useCase = useCase.value;
+      frame.useCaseLocs.set(entry, this.locOf(useCase, line));
+      i += 2;
+    }
+    if (!this.expectEnd(tokens, i, line)) return;
+    if (frame.system.entries.some((e) => e.id === entry.id)) {
+      this.error(`System '${frame.system.id}' already exposes '${entry.id}'`, entry.loc);
+      return;
+    }
+    frame.system.entries.push(entry);
+  }
+
+  /** The parts of a system's `capacity { … }` in `tokens[from, to)`. */
+  private readStub(stub: SystemStub, tokens: Token[], from: number, to: number, line: number) {
+    for (let i = from; i < to; ) {
+      const t = tokens[i];
+      if (t.kind === 'quantity' || t.kind === 'number') {
+        const rps = this.quantityOf(t, 'rps', t, line);
+        if (rps === undefined) return;
+        stub.rps = rps;
+        i++;
+      } else if (isWord(t, 'p99') || isWord(t, 'latency') || isWord(t, 'availability')) {
+        const value = this.quantityOf(i + 1 < to ? tokens[i + 1] : undefined, t.value === 'availability' ? '%' : 'ms', t, line);
+        if (value === undefined) return;
+        if (t.value === 'p99') stub.p99Ms = value;
+        else if (t.value === 'latency') stub.latencyMs = value;
+        else stub.availability = value;
+        i += 2;
+      } else {
+        this.error(`Expected ${STUB_HELP}`, this.locOf(t, line));
+        return;
+      }
+    }
+  }
+
+  /** At the system's `}`: loads the team file and checks the entry points against its use cases. */
+  private finishSystem(frame: SystemFrame) {
+    const { system } = frame;
+    if (system.from !== undefined) {
+      const team = this.loadTeam(system.from, frame.fromLoc ?? system.loc);
+      if (team) {
+        system.resolved = team.path;
+        system.diagram = team.diagram;
+      }
+      if (system.stub) {
+        this.warning(`System '${system.id}' has a from file, which sets its contract; this capacity is ignored`, system.stub.loc);
+        if (team) delete system.stub;
+      }
+    } else if (!system.stub) {
+      this.warning(`System '${system.id}' has no from "file" and no capacity { … }; it is drawn but not simulated`, system.loc);
+    }
+    const team = system.diagram;
+    if (!team) return;
+    const name = fileName(system.resolved ?? '');
+    for (const entry of system.entries) {
+      const wanted = entry.useCase;
+      if (wanted !== undefined) {
+        const u = findUseCaseIn(team, wanted);
+        if (u) entry.useCaseId = u.id;
+        else {
+          const near = team.useCases.find((x) => editDistance(x.name.toLowerCase(), wanted.toLowerCase()) <= Math.max(1, Math.floor(wanted.length / 4)));
+          const all = team.useCases.map((x) => `"${x.name}"`).join(', ');
+          const help = near ? ` Did you mean "${near.name}"?` : all ? ` Its use cases are ${all}` : '';
+          this.error(`${name} has no use case "${wanted}".${help}`, frame.useCaseLocs.get(entry) ?? entry.loc);
+        }
+      } else if (team.useCases.length === 1) {
+        entry.useCaseId = team.useCases[0].id;
+      } else if (team.useCases.length === 0) {
+        this.error(`${name} has no use case for '${entry.id}' to enter`, entry.loc);
+      } else {
+        this.error(`Say which use case '${entry.id}' enters, e.g. expose ${entry.id} -> "${team.useCases[0].name}"`, entry.loc);
+      }
+    }
+    if (system.entries.length === 0) this.warning(`System '${system.id}' exposes no entry point; add expose <id> -> "Use case" so others can call it`, system.loc);
+  }
+
+  /** Parses a team file in its own scope (once per root parse), through the import resolver. */
+  private loadTeam(path: string, loc: SourceLoc): { path: string; diagram: Diagram } | undefined {
+    if (!this.options.resolve) {
+      this.warning(`Files are not resolved in this context; '${path}' was not loaded`, loc);
+      return undefined;
+    }
+    const target = this.resolveFile(path, loc);
+    if (!target) return undefined;
+    const cycleStart = this.chain.indexOf(target.path);
+    if (cycleStart !== -1) {
+      const names = [...this.chain.slice(cycleStart), target.path].map((p) => fileName(p ?? ''));
+      this.error(`System cycle: ${names.join(' → ')}`, loc);
+      return undefined;
+    }
+    let result = this.teamFiles.get(target.path);
+    if (!result) {
+      const scope: Scope = { chain: [...this.chain, target.path], teamFiles: this.teamFiles };
+      result = new Parser(target.source, { path: target.path, resolve: this.options.resolve }, scope).run();
+      this.teamFiles.set(target.path, result);
+      for (const d of result.diagnostics) {
+        if (!this.fileOrder.has(d.file)) this.fileOrder.set(d.file, this.fileOrder.size);
+        this.diagnostics.push(d);
+      }
+    }
+    return { path: target.path, diagram: result.diagram };
+  }
+
+  /**
+   * Resolves `orders.api` references once every file is read: the entry point
+   * `api` of system `orders`. Edges and references then name the system, with
+   * the entry point in `sourcePort` / `targetPort`. On a connection to a
+   * non-system, `b.planned` stays what it always was: `b` with a tag.
+   */
+  private resolvePorts() {
+    for (const ref of this.references) {
+      const dot = ref.id.indexOf('.');
+      if (dot === -1) continue;
+      const prefix = ref.id.slice(0, dot);
+      const port = ref.id.slice(dot + 1);
+      const system = this.systemById.get(prefix);
+      if (system) {
+        if (!system.entries.some((e) => e.id === port)) this.error(this.unexposedMessage(system, port), ref.loc);
+      } else if (ref.edgeTarget) {
+        ref.edgeTarget.tag = port;
+        this.tagRefs.push({ tag: port, loc: { ...ref.loc, col: ref.loc.col + dot, length: ref.loc.length - dot }, target: ref.edgeTarget });
+      } else {
+        this.error(`'${prefix}' is not a system, so '${ref.id}' names nothing; write ${prefix}, or declare system ${prefix} { … }`, ref.loc);
+      }
+      ref.id = prefix;
+    }
+    for (const edge of this.edges) {
+      const [source, sourcePort] = this.splitRef(edge.source);
+      const [target, targetPort] = this.splitRef(edge.target);
+      edge.source = source;
+      edge.target = target;
+      if (sourcePort !== undefined) edge.sourcePort = sourcePort;
+      if (targetPort !== undefined) edge.targetPort = targetPort;
+    }
+  }
+
+  private unexposedMessage(system: DiagramSystem, port: string): string {
+    const entries = system.entries.map((e) => `${system.id}.${e.id}`);
+    const known = entries.length ? `; connect to ${entries.join(' or ')}` : '';
+    const internal = system.diagram?.nodes.some((n) => n.id === port);
+    return internal
+      ? `'${port}' is inside system '${system.id}' but is not an entry point; only entry points are reachable from outside: add expose ${port} -> "Use case"${known}`
+      : `System '${system.id}' has no entry point '${port}'${known}`;
+  }
+
+  /** `orders.api` → `['orders', 'api']` when `orders` is a system; else the id up to its dot, without a port. */
+  private splitRef(id: string): [string, string | undefined] {
+    const dot = id.indexOf('.');
+    if (dot === -1) return [id, undefined];
+    const prefix = id.slice(0, dot);
+    return [prefix, this.systemById.has(prefix) ? id.slice(dot + 1) : undefined];
+  }
+
+  /** A step to a whole system enters its only entry point; with several it must name one. */
+  private onlyEntry(id: string, loc: SourceLoc): string | undefined {
+    const system = this.systemById.get(id);
+    if (!system || system.entries.length === 0) return undefined;
+    if (system.entries.length === 1) return system.entries[0].id;
+    this.errorOnce(`Say which entry point of '${id}' this step enters: ${system.entries.map((e) => `${id}.${e.id}`).join(' or ')}`, loc);
+    return undefined;
   }
 
   private parseUseCase(tokens: Token[], line: number) {
@@ -834,7 +1188,8 @@ class Parser {
     const from = fromToken.value;
     const to = toToken.value;
     const arrow = arrowToken.value as Arrow;
-    this.references.push({ id: from, loc: this.locOf(fromToken, line) }, { id: to, loc: this.locOf(toToken, line) });
+    const toRef: Reference = { id: to, loc: this.locOf(toToken, line) };
+    this.references.push({ id: from, loc: this.locOf(fromToken, line) }, toRef);
 
     const top = this.top();
     const inUseCase = top?.kind === 'usecase' || top?.kind === 'alt' || top?.kind === 'par';
@@ -872,6 +1227,7 @@ class Parser {
         edge.tag = tagToken.value;
         this.tagRefs.push({ tag: tagToken.value, loc: this.locOf(tagToken, line), target: edge });
       }
+      if (!tagToken) toRef.edgeTarget = edge;
       this.edges.push(edge);
     }
     return lastLine;
@@ -1841,9 +2197,11 @@ class Parser {
     for (const step of raw) {
       this.checkConnection(step);
       if (step.arrow === '-->') {
+        const [respFrom] = this.splitRef(step.from);
+        const [respTo] = this.splitRef(step.to);
         const request = [...steps]
           .reverse()
-          .find((s) => s.fromServiceId === step.to && s.toServiceId === step.from && !answered.has(s) && !s.failed);
+          .find((s) => s.fromServiceId === respTo && s.toServiceId === respFrom && !answered.has(s) && !s.failed);
         if (!request) {
           this.warning(`Response has no matching request from '${step.to}' to '${step.from}'`, step.loc);
           continue;
@@ -1863,14 +2221,17 @@ class Parser {
       }
 
       const label = parseStepLabel(step.label);
-      const target = this.nodes.get(step.to);
+      const [from, fromPort] = this.splitRef(step.from);
+      const [to, toPort] = this.splitRef(step.to);
+      const port = toPort ?? this.onlyEntry(to, step.loc);
+      const target = this.nodes.get(to);
       const isAsync = step.arrow === '->>';
       steps.push({
         id: `${prefix}-${steps.length + 1}`,
         stepOrder: steps.length,
         stepName: label.name || `${step.from} → ${step.to}`,
-        fromServiceId: step.from,
-        toServiceId: step.to,
+        fromServiceId: from,
+        toServiceId: to,
         protocol: inferProtocol(isAsync, label.method, target),
         httpMethod: label.method ?? '',
         endpoint: label.endpoint ?? '',
@@ -1887,6 +2248,8 @@ class Parser {
         ...(step.multiplier !== undefined ? { multiplier: step.multiplier } : {}),
         ...(step.sizeBytes !== undefined ? { sizeBytes: step.sizeBytes } : {}),
         access: accessOf(label.method, step.label),
+        ...(port !== undefined ? { toPort: port } : {}),
+        ...(fromPort !== undefined ? { fromPort } : {}),
       });
     }
 
@@ -1898,9 +2261,11 @@ class Parser {
    * Documents without any connection are use-case-only sketches; they are left alone.
    */
   private checkConnection(step: RawStep) {
-    if (this.edges.length === 0 || step.from === step.to || this.connected.has(`${step.from}|${step.to}`)) return;
+    const [a] = this.splitRef(step.from);
+    const [b] = this.splitRef(step.to);
+    if (this.edges.length === 0 || a === b || this.connected.has(`${a}|${b}`)) return;
     // A response travels back along the request's connection, so suggest the request direction.
-    const [from, to] = step.arrow === '-->' ? [step.to, step.from] : [step.from, step.to];
+    const [from, to] = step.arrow === '-->' ? [b, a] : [a, b];
     this.warning(`No connection between '${from}' and '${to}' in the architecture; add '${from} -> ${to}'`, step.loc);
   }
 
@@ -2014,6 +2379,14 @@ class Parser {
     this.diagnostics.push({ severity: 'error', message, ...loc });
   }
 
+  /** An error for a step that every scenario sharing it would report again. */
+  private errorOnce(message: string, loc: SourceLoc) {
+    const key = `error\n${loc.file ?? ''}\n${loc.line}\n${loc.col}\n${message}`;
+    if (this.warned.has(key)) return;
+    this.warned.add(key);
+    this.error(message, loc);
+  }
+
   private warning(message: string, loc: SourceLoc) {
     // Steps shared by several scenarios are checked once per scenario; report each problem once.
     // A Set, not a scan of every diagnostic: many warnings made the scan quadratic.
@@ -2078,6 +2451,30 @@ interface StyleParts {
   color?: { name: string; hex: string };
   tag?: { value: string; loc: SourceLoc };
   critical?: boolean;
+}
+
+/**
+ * Joins `orders` and `.api` written without a space into one id, `orders.api`,
+ * where a connection or step names a node: before or after its arrow.
+ */
+function qualify(tokens: Token[]): Token[] {
+  let out: Token[] | undefined;
+  for (let i = 0; i < tokens.length; i++) {
+    const [t, next] = [tokens[i], tokens[i + 1]];
+    const joined = t.kind === 'ident' && next?.kind === 'tag' && next.col === t.col + t.length;
+    if (joined && (tokens[i + 2]?.kind === 'arrow' || tokens[i - 1]?.kind === 'arrow')) {
+      out ??= tokens.slice(0, i);
+      out.push({ ...t, value: `${t.value}.${next.value}`, length: t.length + next.length });
+      i++;
+    } else out?.push(t);
+  }
+  return out ?? tokens;
+}
+
+/** A use case of `diagram` by name (exact, then ignoring case) or id, like the simulation finds them. */
+function findUseCaseIn(diagram: Diagram, name: string): DiagramUseCase | undefined {
+  const lower = name.toLowerCase();
+  return diagram.useCases.find((u) => u.name === name) ?? diagram.useCases.find((u) => u.name.toLowerCase() === lower) ?? diagram.useCases.find((u) => u.id === name);
 }
 
 function isWord(token: Token | undefined, word: string): boolean {

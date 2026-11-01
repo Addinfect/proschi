@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Enforced in builds; inert under `npm run dev` (see .env.production). Styles allow 'unsafe-inline' only because the
+         live examples' diagrams (React Flow) set inline styles; scripts stay 'self' only. frame-ancestors cannot be set from
+         a meta tag. -->
+    <meta
+      http-equiv="%VITE_CSP_HTTP_EQUIV%"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'"
+    />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#FFF8E7" />
+    <!-- Applies the saved or system theme before first paint. -->
+    <script src="../../theme-init.js"></script>
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- Title, description and canonical URL from docs/site.json (plugins/docsSite.ts). -->
+    <!--docs:head-->
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <!--shell:header-->
+
+    <!--docs:page-->
+
+    <!--shell:footer-->
+
+    <script type="module" src="../../src/docs/main.ts"></script>
+  </body>
+</html>

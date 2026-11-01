@@ -49,7 +49,7 @@ export const KEYWORDS: { label: string; detail: string; snippet: string }[] = [
   { label: 'par', detail: 'Steps that run in parallel', snippet: 'par {\n\t$0\n}' },
   { label: 'alt', detail: 'One scenario of a use case', snippet: 'alt "${1:Scenario}" {\n\t$0\n}' },
   { label: 'legend', detail: 'Styles that .tag applies: owned "Owned by us" green', snippet: 'legend {\n\t${1:tag} "${2:What it means}" ${3:blue}$0\n}' },
-  // Layout hints (docs/LANGUAGE.md, "Steering the layout").
+  // Layout hints (docs/STYLING.md, "Steering the layout").
   { label: 'direction', detail: 'Where edges flow: down, right, up or left (top level or in a group)', snippet: 'direction ${1|down,right,up,left|}' },
   { label: 'layout ordered', detail: 'Lay edges out by declaration order (top level)', snippet: 'layout ordered' },
   // High-level design sections (top level).
@@ -61,7 +61,7 @@ export const KEYWORDS: { label: string; detail: string; snippet: string }[] = [
   { label: 'test', detail: 'Flow assertions: "Use case" calls any cache', snippet: 'test "${1:Name}" {\n\t$0\n}' },
 ];
 
-/** Assertion forms offered at the start of a line inside a `test` block (docs/LANGUAGE.md, "test"). */
+/** Assertion forms offered at the start of a line inside a `test` block (docs/TESTS.md, "Tests"). */
 export const ASSERTIONS: { label: string; detail: string; snippet: string }[] = [
   { label: '"Use case" calls', detail: 'Some scenario calls the node', snippet: '"${1:Use case}" calls ${2:node}' },
   { label: '"Use case" never calls', detail: 'No scenario calls the node', snippet: '"${1:Use case}" never calls ${2:node}' },

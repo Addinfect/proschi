@@ -3,9 +3,9 @@ name: Tooling
 on:
   push:
     branches: [main]
-    paths: ['tooling/**', 'frontend/src/dsl/**', 'frontend/src/catalog/**', 'frontend/src/types/**', 'frontend/src/hld/**', 'frontend/src/sim/**', 'frontend/src/utils/**', 'frontend/src/practice/**', 'frontend/src/learn/**', 'frontend/src/game/**', 'frontend/src/playground/**', 'frontend/index.html', 'plugin/**', '.github/workflows/tooling.yml']
+    paths: ['tooling/**', 'frontend/src/dsl/**', 'frontend/src/catalog/**', 'frontend/src/types/**', 'frontend/src/hld/**', 'frontend/src/sim/**', 'frontend/src/utils/**', 'frontend/src/practice/**', 'frontend/src/learn/**', 'frontend/src/game/**', 'frontend/src/playground/**', 'frontend/index.html', 'plugin/**', 'docs/images/**', '.github/workflows/tooling.yml']
   pull_request:
-    paths: ['tooling/**', 'frontend/src/dsl/**', 'frontend/src/catalog/**', 'frontend/src/types/**', 'frontend/src/hld/**', 'frontend/src/sim/**', 'frontend/src/utils/**', 'frontend/src/practice/**', 'frontend/src/learn/**', 'frontend/src/game/**', 'frontend/src/playground/**', 'frontend/index.html', 'plugin/**', '.github/workflows/tooling.yml']
+    paths: ['tooling/**', 'frontend/src/dsl/**', 'frontend/src/catalog/**', 'frontend/src/types/**', 'frontend/src/hld/**', 'frontend/src/sim/**', 'frontend/src/utils/**', 'frontend/src/practice/**', 'frontend/src/learn/**', 'frontend/src/game/**', 'frontend/src/playground/**', 'frontend/index.html', 'plugin/**', 'docs/images/**', '.github/workflows/tooling.yml']
   workflow_dispatch:
 
 permissions:

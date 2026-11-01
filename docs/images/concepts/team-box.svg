@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="290" viewBox="0 0 640 290" role="img">
+<title>A team system drawn as one box, and the same box expanded into the team's own design</title>
+<style>
+  .t { font-family: 'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif; fill: #111111; }
+  .m { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-ligatures: none; fill: #111111; }
+  .name { font-size: 15px; font-weight: 700; }
+  .s { font-size: 13px; }
+  .xs { font-size: 12px; }
+  .b { font-weight: 700; }
+  .mut { fill: #5B5B5B; }
+  .box { fill: #FFFFFF; stroke: #111111; stroke-width: 2; }
+  .sh { fill: #111111; }
+  .edge { fill: none; stroke: #5B5B5B; stroke-width: 2; }
+  .tip { fill: #5B5B5B; }
+  .port { fill: #FFFFFF; stroke: #111111; stroke-width: 2; }
+</style>
+<rect width="640" height="290" fill="#FFF8E7"/>
+
+<!-- the box, collapsed -->
+<text x="85" y="44" text-anchor="middle" class="m xs b">orders.api</text>
+<rect x="25" y="65" width="210" height="112" rx="6" class="sh"/>
+<rect x="20" y="60" width="210" height="112" rx="6" class="box" style="stroke-width:3;stroke:#D32F2F;fill:#FFF4F2"/>
+<rect x="80" y="55" width="10" height="10" class="port"/>
+<rect x="146" y="50" width="88" height="20" rx="10" fill="#FFFFFF" stroke="#D32F2F" stroke-width="2"/>
+<text x="190" y="64" text-anchor="middle" class="t xs b" style="fill:#D32F2F">✕ saturated</text>
+<text x="34" y="86" class="t name">Order Processing</text>
+<text x="34" y="104" class="t s mut">@Orders</text>
+<text x="34" y="130" class="m s">promise p99 150 ms</text>
+<text x="34" y="150" class="m s b">2k / 1.7k rps</text>
+<text x="216" y="150" text-anchor="end" class="t xs mut">headroom</text>
+<rect x="34" y="158" width="182" height="5" rx="2" fill="#111111" fill-opacity="0.12"/>
+<rect x="34" y="158" width="182" height="5" rx="2" fill="#D32F2F"/>
+
+<!-- what the box is made of -->
+<text x="20" y="208" class="m xs"><tspan class="b">expose</tspan> api -&gt; "Place order"</text>
+<text x="20" y="230" class="t xs"><tspan class="b">promise:</tspan> the team file's requirements</text>
+<text x="20" y="252" class="t xs"><tspan class="b">headroom:</tspan> its nodes, simulated under</text>
+<text x="20" y="268" class="t xs">your load plus the team's own</text>
+
+<!-- expand -->
+<path d="M246,116 L282,116" class="edge"/><path d="M290,116 L280,111 L280,121 Z" class="tip"/>
+<text x="268" y="106" text-anchor="middle" class="t xs b">Expand</text>
+
+<!-- the team's design, inside the box -->
+<rect x="300" y="24" width="320" height="250" rx="8" fill="#F7F0DE" stroke="#111111" stroke-width="2" stroke-dasharray="6 4"/>
+<text x="316" y="46" class="t xs b" style="letter-spacing:0.08em">ORDER PROCESSING</text>
+<text x="606" y="264" text-anchor="end" class="m xs mut">teams/orders.proschi</text>
+
+<path d="M385,102 L385,124" class="edge"/><path d="M385,132 L380,122 L390,122 Z" class="tip"/>
+<path d="M385,174 L385,200" class="edge"/><path d="M385,208 L380,198 L390,198 Z" class="tip"/>
+<path d="M450,153 L486,153" class="edge"/><path d="M494,153 L484,148 L484,158 Z" class="tip"/>
+<text x="462" y="85" class="m xs mut">entry: "Place order"</text>
+
+<rect x="323" y="63" width="130" height="40" rx="6" class="sh"/><rect x="320" y="60" width="130" height="40" rx="6" class="box"/>
+<rect x="380" y="55" width="10" height="10" class="port"/>
+<text x="334" y="85" class="t s b">Gateway</text>
+
+<rect x="323" y="137" width="130" height="40" rx="6" class="sh"/><rect x="320" y="134" width="130" height="40" rx="6" class="box"/>
+<text x="334" y="159" class="t s b">Orders API</text>
+
+<rect x="323" y="213" width="130" height="40" rx="6" class="sh"/><rect x="320" y="210" width="130" height="40" rx="6" class="box" style="fill:#FFE0DD;stroke:#D32F2F"/>
+<text x="334" y="235" class="t s b">Orders DB</text>
+<text x="440" y="235" text-anchor="end" class="m xs b" style="fill:#D32F2F">115%</text>
+
+<rect x="503" y="137" width="104" height="40" rx="6" class="sh"/><rect x="500" y="134" width="104" height="40" rx="6" class="box"/>
+<text x="514" y="159" class="t s b">Stock cache</text>
+</svg>

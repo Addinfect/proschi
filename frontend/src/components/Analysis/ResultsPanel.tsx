@@ -27,7 +27,7 @@ export default function ResultsPanel({ diagram, analysis, results, onSelect, rev
       <div className="max-w-4xl mx-auto px-4 py-4 space-y-6 text-sm">
         <Checks results={results} onSelect={onSelect} />
         {hasTraffic ? (
-          <AnalysisBody diagram={diagram} analysis={analysis} onSelect={onSelect} />
+          <AnalysisBody diagram={diagram} analysis={analysis} results={results} onSelect={onSelect} />
         ) : (
           <section className="space-y-3 text-ink/75">
             <NoTraffic />

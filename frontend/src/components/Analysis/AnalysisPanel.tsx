@@ -1,13 +1,16 @@
 import { AlertTriangle, Info, ShieldAlert } from 'lucide-react';
 import type { Diagram, SourceLoc } from '../../dsl';
 import ModelLink from './ModelLink';
-import { HOT, formatAvailability, formatMs, formatPercent, formatRps, formatUsd, type Analysis, type NodeAnalysis } from '../../sim';
+import { HOT, formatAvailability, formatMs, formatPercent, formatRps, formatUsd, type Analysis, type NodeAnalysis, type TestResult } from '../../sim';
+import { systemSummaries } from '../Canvas/systemSummary';
 
 interface AnalysisPanelProps {
   diagram: Diagram;
   analysis: Analysis;
   /** Jumps to a node's declaration. */
   onSelect: (loc: SourceLoc) => void;
+  /** The test results, for who to ask about a system that cannot take its load. */
+  results?: TestResult[];
 }
 
 const PERCENTILES = ['p50', 'p95', 'p99', 'p999'] as const;
@@ -26,7 +29,7 @@ export default function AnalysisPanel(props: AnalysisPanelProps) {
 }
 
 /** The analysis itself, for a document with traffic: headline numbers, nodes, use cases and single points of failure. */
-export function AnalysisBody({ diagram, analysis, onSelect }: AnalysisPanelProps) {
+export function AnalysisBody({ diagram, analysis, onSelect, results }: AnalysisPanelProps) {
   const byId = new Map(diagram.nodes.map((n) => [n.id, n]));
   const nodes = analysis.nodes.filter((n) => n.kind !== 'client' && n.kind !== 'other');
   const saturated = nodes.filter((n) => n.saturated).length;
@@ -54,6 +57,8 @@ export function AnalysisBody({ diagram, analysis, onSelect }: AnalysisPanelProps
           ))}
         </ul>
       )}
+
+      {(analysis.systems?.length ?? 0) > 0 && <Systems diagram={diagram} analysis={analysis} results={results ?? []} onSelect={onSelect} />}
 
       <section>
         <h2 className="mb-2 font-semibold text-ink">Nodes</h2>
@@ -191,6 +196,69 @@ export function AnalysisBody({ diagram, analysis, onSelect }: AnalysisPanelProps
         </span>
       </p>
     </>
+  );
+}
+
+/** Per system (docs/design/team-systems-and-imports.md): what it is sent against what its design takes, and whether it holds its promise. */
+function Systems({ diagram, analysis, results, onSelect }: Required<AnalysisPanelProps>) {
+  const summaries = systemSummaries(diagram, analysis, results, diagram, '');
+  return (
+    <section aria-labelledby="analysis-systems">
+      <h2 id="analysis-systems" className="mb-1 font-semibold text-ink">
+        Systems
+      </h2>
+      <p className="mb-2 text-xs text-muted">Each team's design under its own traffic plus what this diagram sends it; it takes the extra load shown before a node saturates.</p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left tabular-nums">
+          <thead className="text-xs uppercase tracking-wide text-muted">
+            <tr>
+              <th className="py-1 pr-3 font-medium">System</th>
+              <th className="py-1 pr-3 font-medium">Sent / takes</th>
+              <th className="py-1 pr-3 font-medium">Promise</th>
+              <th className="py-1 pr-3 font-medium text-right whitespace-nowrap">p99 seen</th>
+              <th className="py-1 font-medium">Status</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-ink/10">
+            {(analysis.systems ?? []).map((sa) => {
+              const s = summaries.get(sa.id);
+              const node = diagram.nodes.find((n) => n.id === sa.id);
+              const system = diagram.systems?.find((x) => x.id === sa.id);
+              if (!s || !node) return null;
+              const tone = s.status === 'over' ? 'text-red-700 dark:text-red-300 font-semibold' : s.status === 'hot' ? 'text-amber-700 dark:text-amber-300 font-semibold' : 'text-ink/75';
+              const p99 = Math.max(0, ...sa.entries.map((e) => e.p99Ms));
+              return (
+                <tr key={sa.id} className="align-top">
+                  <td className="py-1.5 pr-3">
+                    <button onClick={() => system && onSelect(system.loc)} className="text-left hover:underline" title="Go to the system block">
+                      <span className="font-medium text-ink">{node.name}</span>
+                      <span className="block text-xs text-muted">
+                        {node.ownerTeam ? `@${node.ownerTeam} · ` : ''}
+                        {s.linked ? s.file : s.stub ? 'declared, no design linked' : 'not simulated'}
+                      </span>
+                    </button>
+                  </td>
+                  <td className="py-1.5 pr-3 text-ink/85 whitespace-nowrap">
+                    {s.ports.map((p) => (
+                      <span key={p.id} className="block" title={p.useCase ? `Into "${p.useCase}"` : undefined}>
+                        <span className="text-xs text-muted">{p.id} </span>
+                        {formatRps(p.sentRps)} <span className="text-muted">/ {Number.isFinite(p.limitRps) ? formatRps(p.limitRps) : 'any'}</span>
+                      </span>
+                    ))}
+                  </td>
+                  <td className="py-1.5 pr-3 text-ink/85 whitespace-nowrap">{s.promise ?? <span className="text-muted">none stated</span>}</td>
+                  <td className="py-1.5 pr-3 text-right text-ink/85 whitespace-nowrap">{s.status === 'unsimulated' ? '—' : formatMs(p99)}</td>
+                  <td className="py-1.5">
+                    <span className={`text-xs ${tone}`}>{s.label}</span>
+                    {s.hint && <span className="block text-xs text-amber-800 dark:text-amber-200">{s.hint}</span>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 

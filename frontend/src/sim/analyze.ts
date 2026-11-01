@@ -3,6 +3,7 @@ import { accessIn } from './access';
 import { criticalPath, fallbacksFor, findScenario, findUseCase, needs, pathNodes, type Hop } from './flow';
 import { formatPercent, formatRps } from './format';
 import { capacityOf, combinedUtilization, profileOf, type Profile } from './profiles';
+import { analyzeSystems, type SharedSystemLoad, type SystemAnalysis } from './systems';
 
 /**
  * A deterministic, analytical model of the design under its traffic
@@ -113,6 +114,8 @@ export interface Analysis {
   /** Ids of single-replica nodes a use case needs and cannot do without. */
   singlePointsOfFailure: string[];
   warnings: string[];
+  /** Each `system` under what the diagram sends it (sim/systems.ts); absent when there are none. */
+  systems?: SystemAnalysis[];
 }
 
 export interface AnalyzeOptions {
@@ -127,6 +130,8 @@ export interface AnalyzeOptions {
    * asks only for what it reads. All of them by default.
    */
   percentiles?: readonly Percentile[];
+  /** Internal: the load on every team design of the document being analysed (sim/systems.ts), passed to the team designs' own analyses. */
+  sharedSystems?: SharedSystemLoad;
 }
 
 export const DEFAULT_TIMEOUT_MS = 1000;
@@ -216,7 +221,7 @@ export interface Load {
  * target is down in that scenario, so it receives nothing, and nothing is
  * sent back.
  */
-function forEachStepRate(diagram: Diagram, traffic: Map<string, UseCaseTraffic>, visit: (step: DiagramStep, rate: number) => void) {
+export function forEachStepRate(diagram: Diagram, traffic: Map<string, UseCaseTraffic>, visit: (step: DiagramStep, rate: number) => void) {
   for (const u of diagram.useCases) {
     const { rps, shares } = traffic.get(u.id) ?? { rps: 0, shares: [] };
     u.scenarios.forEach((s, i) => {
@@ -449,6 +454,8 @@ export function usageText(n: Usage): string {
     return `bandwidth ${mb(n.bandwidthLoadMBps)} of ${mb(n.bandwidthCapacityMBps)}, ${formatPercent(n.bandwidthUtilization)}`;
   }
   if (n.writeScaling === 'shards' && n.writeLoadRps > 0) {
+    // Only the dimension that is loaded: no "reads 0 rps of 60k rps, 0%".
+    if (n.readLoadRps <= 0) return `writes ${part(n.writeLoadRps, n.writeCapacityRps, n.writeUtilization)}`;
     return `reads ${part(n.readLoadRps, n.readCapacityRps, n.readUtilization)}; writes ${part(n.writeLoadRps, n.writeCapacityRps, n.writeUtilization)}`;
   }
   return part(n.loadRps, n.capacityRps, n.requestUtilization);
@@ -571,6 +578,7 @@ export function analyze(diagram: Diagram, options: AnalyzeOptions = {}): Analysi
   const load = computeLoad(diagram, traffic);
   const egress = computeEgressGb(diagram, traffic, kindOf);
   const bytes = computeBytesPerSecond(diagram, traffic);
+  const systems = diagram.systems?.length ? analyzeSystems(diagram, traffic, options) : undefined;
 
   const hops = new Map<string, HopModel>();
   const nodeResults: NodeAnalysis[] = nodes.map((n) => {
@@ -611,13 +619,14 @@ export function analyze(diagram: Diagram, options: AnalyzeOptions = {}): Analysi
     if (n.saturated) warnings.push(`'${n.id}' is saturated: ${usage}. ${writeBound(n) ? 'Add shards for writes' : 'Add replicas'} or take load off it.`);
     else if (n.utilization > HOT) warnings.push(`'${n.id}' runs hot: ${usage}.`);
   }
+  for (const s of systems?.systems ?? []) warnings.push(...s.warnings);
 
   const access = accessIn(diagram);
   const pathOf = (hopsOfPath: Hop[][]): PathModel => ({
     parts: hopsOfPath.map((part) =>
       part.map((h) => {
         if (h.failed) return { fixedMs: timeoutOf(h.target), tailMs: 0 };
-        const hop = hops.get(h.target) ?? { fixedMs: 0, tailMs: 0 };
+        const hop = systems?.hop(h.target, h.step.toPort) ?? hops.get(h.target) ?? { fixedMs: 0, tailMs: 0 };
         return { fixedMs: transferMs(h.step, bandwidthOf) + hop.fixedMs, tailMs: hop.tailMs };
       }),
     ),
@@ -648,6 +657,7 @@ export function analyze(diagram: Diagram, options: AnalyzeOptions = {}): Analysi
     const writes = mainWrites(u, shares, (step) => access(step) === 'write');
     const availabilityOf = (id: string) => {
       const n = nodeById.get(id);
+      if (!n && systems) return systemAvailability(u, id, systems.availability);
       return !n ? 1 : writes.has(id) ? n.writeAvailability : n.availability;
     };
     return { id: u.id, name: u.name, rps, scenarios, percentiles, tailScenario, availability: useCaseAvailability(u, shares, availabilityOf) };
@@ -660,7 +670,15 @@ export function analyze(diagram: Diagram, options: AnalyzeOptions = {}): Analysi
     totalEgressUsd: nodeResults.reduce((sum, n) => sum + n.egressUsd, 0),
     singlePointsOfFailure: singlePointsOfFailure(diagram),
     warnings,
+    ...(systems ? { systems: systems.systems } : {}),
   };
+}
+
+/** A system's availability for a use case: the weakest entry point the use case enters (1 when it is not a simulated system). */
+function systemAvailability(u: DiagramUseCase, id: string, availability: (id: string, port: string | undefined) => number | undefined): number {
+  let result = 1;
+  for (const s of u.scenarios) for (const step of s.steps) if (step.toServiceId === id) result = Math.min(result, availability(id, step.toPort) ?? 1);
+  return result;
 }
 
 /** Nodes the main scenario writes to on its synchronous critical path (they need a single-primary store's primary). */

@@ -1,0 +1,24 @@
+title "Feed"
+direction right
+gateway [AWS API Gateway] x2
+api [REST API] x3
+db [PostgreSQL] x6
+gateway -> api
+api -> db
+svc1 [Service] x2
+cache1 [Redis]
+api -> svc1
+svc1 -> cache1
+usecase "Publish event" {
+  gateway -> api : POST /publish-event
+  api -> db : SELECT row
+  api --> gateway : 201
+}
+usecase "Background" {
+  api -> svc1 : refresh
+  svc1 -> cache1 : GET key
+}
+traffic {
+  "Publish event" 500 rps
+  "Background" 100 rps
+}

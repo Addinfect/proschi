@@ -1,10 +1,9 @@
-# Draw systems by typing
+# Why architecture diagrams as text
 
 Proschi is a small text language for architecture diagrams and high-level
-designs. You write the services, stores and queues of a system and the
-requests that flow between them; Proschi lays out the diagram, plays every
-request step by step, and checks the design against the traffic and
-requirements you write next to it.
+designs. You write the services, stores and queues and the requests between
+them. Proschi lays out the diagram, plays each request step by step, and
+checks the design against the traffic and requirements you write beside it.
 
 ```proschi
 title "Notes"
@@ -28,32 +27,33 @@ usecase "Create a note" {
 }
 ```
 
+> **Try it:** pick **Create a note › DB down** and press **Play**. The
+> insert fails at the database and the user gets a `503`.
+
 ## Why text
 
 - **It diffs.** A design is a file next to the code, reviewed in pull
   requests like the code. No exported PNG that drifts from the system.
 - **It lays itself out.** You never drag a box. Add a line and the diagram
-  follows; pin a node with `pos` only when you want to.
-- **It plays.** A use case is a real request flow: each step names its
-  endpoint, payload and status, and `alt` keeps the happy path and every way
-  it fails side by side.
+  follows. Pin a node with `pos` only when you want to.
+- **It plays.** A use case is a real request: each step names its endpoint,
+  payload and status, and `alt` keeps the success path and every failure
+  side by side.
 - **It checks itself.** With `traffic` and `requirements`, a deterministic
-  simulation tells you which node saturates first, what p99 to expect,
-  whether the design survives a node failure and what it costs.
-- **It stays yours.** The editor runs entirely in your browser. Your diagrams
-  are saved there and travel in share links, never on a server. See
-  [Privacy](PRIVACY.md).
+  simulation says which node saturates first, what p99 to expect, whether
+  the design survives a node failure and what it costs.
+- **It runs in your browser.** The editor parses, lays out and simulates
+  locally. Signed out, your diagrams stay in the browser and in the links
+  you share. Signing in adds cloud sync (see [Privacy](PRIVACY.md)).
 
-## Start here
+## When it fits
 
-1. [Quickstart](QUICKSTART.md): your first diagram in two minutes.
-2. [Language reference](LANGUAGE.md): every statement, with the grammar.
-3. [How the simulation works](https://proschi.app/docs/model/): the
-   formulas, the default numbers, and how far to trust them.
-4. [Editor support](EDITORS.md): VS Code, IntelliJ, Neovim, Helix, Sublime
-   Text, the command line and CI.
-5. [Practice](https://proschi.app/practice/): system design problems with
-   tests instead of opinions, and [how to write one](PRACTICE.md).
+Proschi fits a design you want to review, play and check before you build
+it: a new service, a system design interview, a team's slice of a larger
+system. It is not a free-form drawing tool: every box is a node the
+simulation counts. And the simulation estimates from default numbers per
+tech stack, so it compares designs rather than measuring yours. [How the simulation works](https://proschi.app/docs/model/)
+says how far to trust its numbers.
 
-Proschi is free and open source under the MIT license. The code is on
-[GitHub](https://github.com/gvart/proschi).
+Start with the [Quickstart](QUICKSTART.md). Proschi is free and open source
+under the MIT license, on [GitHub](https://github.com/gvart/proschi).

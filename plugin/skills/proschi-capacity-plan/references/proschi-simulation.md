@@ -2,7 +2,7 @@
 
 The blocks that carry load, targets and checks, and the numbers the
 simulation starts from. Full reference:
-<https://proschi.app/docs/language/#high-level-design>; how the model works:
+<https://proschi.app/docs/hld/>; how the model works:
 <https://proschi.app/docs/model/>.
 
 ## Blocks (all optional, top level)

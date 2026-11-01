@@ -124,6 +124,25 @@ export function updateCurrent(state: DocumentState, source: string, now: Clock =
   };
 }
 
+/** Changes the text of the diagram `id`, e.g. a team file edited while navigated into it from the org diagram. */
+export function updateDoc(state: DocumentState, id: string, source: string, now: Clock = defaultClock): DocumentState {
+  if (state.docs.find((d) => d.id === id)?.source === source) return state;
+  return { ...state, docs: state.docs.map((d) => (d.id === id ? { ...d, source, updatedAt: now() } : d)) };
+}
+
+/**
+ * Adds the files a diagram imports (path → source) as diagrams of those file
+ * names, so its imports resolve and the files can be edited; a file name
+ * already saved keeps its diagram, so opening the same example again adds nothing.
+ */
+export function addFiles(state: DocumentState, files: Readonly<Record<string, string>>, now: Clock = defaultClock, newId: IdFactory = defaultIds): DocumentState {
+  const taken = new Set(state.docs.map(fileNameOf));
+  const added = Object.entries(files)
+    .filter(([path]) => !taken.has(path))
+    .map(([fileName, source]) => ({ id: newId(), source, updatedAt: now(), fileName }));
+  return added.length ? { ...state, docs: [...state.docs, ...added] } : state;
+}
+
 export function addDoc(state: DocumentState, source: string, now: Clock = defaultClock, newId: IdFactory = defaultIds): DocumentState {
   const doc = { id: newId(), source, updatedAt: now() };
   return { docs: nameDocs([doc, ...state.docs]), currentId: doc.id };

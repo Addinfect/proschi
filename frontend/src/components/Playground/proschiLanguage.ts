@@ -35,7 +35,7 @@ export const SECTION_HEADER = new RegExp(
 );
 /** `decision "…" because "…"`: a section statement without a block. */
 export const ONE_LINE_DECISION = new RegExp(`^\\s*decision\\s+${STRING}\\s+because\\b`);
-/** Words with a meaning inside section blocks (docs/LANGUAGE.md, "High-level design"). */
+/** Words with a meaning inside section blocks (docs/HLD.md). */
 const SECTION_WORDS =
   /^(traffic|requirements|capacity|entity|decision|test|mix|durable|volatile|survive|because|rejected|calls|before|after|never|every|waits|for|starts|at|or|responds|writes|reads|responding|handles|failure|path|replicas|any|strong|eventual|store|in|scenario|latency|availability|cost|shards|consistency|bandwidth|egress|timeout|no|from|to|has|of|node|key|index|unique|optional|p50|p90|p95|p99|p999)\b/;
 /** A number with an optional fraction and unit, attached or one space away: 120, 2.5, 50ms, 100k rps, 99.9 %. */
@@ -145,7 +145,7 @@ const keywordOptions: Completion[] = [
   { label: 'par', type: 'keyword', apply: 'par {', detail: 'parallel steps' },
   { label: 'alt', type: 'keyword', apply: 'alt "', detail: 'alt "Scenario" { … }' },
   snippetCompletion('legend {\n\t${tag} "${What it means}" ${blue}\n}', { label: 'legend', type: 'keyword', detail: 'styles that .tag applies' }),
-  // Layout hints (docs/LANGUAGE.md, "Steering the layout").
+  // Layout hints (docs/STYLING.md, "Steering the layout").
   snippetCompletion('direction ${right}', { label: 'direction', type: 'keyword', detail: 'down, right, up or left' }),
   { label: 'layout ordered', type: 'keyword', detail: 'edges follow declaration order' },
   // The high-level design sections, top level only.

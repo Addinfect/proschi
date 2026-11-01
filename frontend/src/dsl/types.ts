@@ -54,9 +54,17 @@ export type DiagramStep = FlowStep & {
   sizeBytes?: number;
   /** Read or write, from the HTTP method or the label's verb (docs/design/hld-and-practice.md §7.2). */
   access?: 'read' | 'write';
+  /** `-> orders.api`: the entry point of the target system (`toServiceId` is the system). */
+  toPort?: string;
+  /** `orders.api -> …`: the entry point of the sending system. */
+  fromPort?: string;
 };
 
-export type DiagramNodeKind = 'component' | 'group' | 'text';
+/**
+ * `system` is a team's design as one box (docs/design/team-systems-and-imports.md);
+ * an expanded system is drawn as a `group` with `system` set.
+ */
+export type DiagramNodeKind = 'component' | 'group' | 'text' | 'system';
 
 /** Where edges flow in the auto layout: `direction down|right|up|left`. */
 export type LayoutDirection = 'down' | 'right' | 'up' | 'left';
@@ -64,7 +72,7 @@ export type LayoutDirection = 'down' | 'right' | 'up' | 'left';
 /** A layout layer: 0, 1, 2, … from the top (in the flow's direction), or the first or last one. */
 export type Rank = number | 'first' | 'last';
 
-/** Top-level layout hints; see docs/LANGUAGE.md, "Steering the layout". */
+/** Top-level layout hints; see docs/STYLING.md, "Steering the layout". */
 export interface LayoutHints {
   /** `direction right`: the flow of the whole diagram (default down). */
   direction?: LayoutDirection;
@@ -107,6 +115,11 @@ export interface DiagramNode {
   direction?: LayoutDirection;
   /** Fill and border from `color` and `tag` (explicit color first); absent when neither is set. */
   style?: ElementStyle;
+  /**
+   * Set by `viewDiagram` (dsl/view.ts): on the frame of an expanded system,
+   * the system's id; on a node inside one, the id of the system it belongs to.
+   */
+  system?: string;
   loc: SourceLoc;
 }
 
@@ -140,6 +153,10 @@ export interface DiagramEdge {
   tag?: string;
   /** Stroke color and dash from the tag. */
   style?: ElementStyle;
+  /** `orders.api -> …`: the entry point of the source system (`source` is the system). */
+  sourcePort?: string;
+  /** `… -> orders.api`: the entry point of the target system (`target` is the system). */
+  targetPort?: string;
   loc: SourceLoc;
 }
 
@@ -197,6 +214,50 @@ export interface Diagram {
   legend?: LegendEntry[];
   /** `direction` and `layout ordered` at the top level; absent when neither is used. */
   layout?: LayoutHints;
+  /** `system` blocks, each a node of kind `system` too; absent when there are none. */
+  systems?: DiagramSystem[];
+}
+
+/** `expose api "Orders API" -> "Place order"`: an entry point of a system. */
+export interface SystemEntry {
+  id: string;
+  name: string;
+  /** The team use case it enters, as written; absent when the team file has a single use case or there is no team file. */
+  useCase?: string;
+  /** Id of that use case in the team design, once resolved. */
+  useCaseId?: string;
+  loc: SourceLoc;
+}
+
+/** `capacity { 2k rps p99 150ms availability 99.95% }` inside a system without `from`. */
+export interface SystemStub {
+  rps?: number;
+  /** `p99 150ms`: the promised p99. */
+  p99Ms?: number;
+  /** `latency 40ms`: the mean latency. */
+  latencyMs?: number;
+  /** 0..100 */
+  availability?: number;
+  loc: SourceLoc;
+}
+
+/**
+ * A `system` block: a team's design behind a contract
+ * (docs/design/team-systems-and-imports.md). Its node is the `nodes` entry
+ * with the same id and kind `system`.
+ */
+export interface DiagramSystem {
+  id: string;
+  /** `from "path"` as written. */
+  from?: string;
+  /** Path the resolver returned for `from`. */
+  resolved?: string;
+  /** The team design, parsed in its own scope (ids are not namespaced here). */
+  diagram?: Diagram;
+  entries: SystemEntry[];
+  /** The stub contract; left out when a `from` design is loaded (the file wins). */
+  stub?: SystemStub;
+  loc: SourceLoc;
 }
 
 /** Simulation class of a node (docs/design/hld-and-practice.md §2.1). */
@@ -372,6 +433,6 @@ export type ImportResolver = (importPath: string, fromPath: string | undefined) 
 export interface ParseOptions {
   /** Path of the root document, so its imports resolve relative to it and import cycles back to it are found. */
   path?: string;
-  /** Loads imported files; without it, `import` statements only produce a warning. */
+  /** Loads imported files and the team files of `system … { from "…" }`; without it, they only produce a warning. */
   resolve?: ImportResolver;
 }

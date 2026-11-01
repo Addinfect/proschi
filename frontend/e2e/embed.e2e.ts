@@ -1,4 +1,5 @@
 import { canvasNodes, codeEditor, expect, test, waitForCanvas } from './fixtures';
+import { droneLink } from './drone';
 
 /**
  * The read-only embed page (/embed/, src/embed/main.tsx) and the editor's
@@ -55,6 +56,15 @@ test.describe('embed', () => {
     const frame = host.frameLocator('iframe');
     await expect(frame.locator('.react-flow__node').filter({ hasText: 'Order Service' })).toBeVisible();
     await expect(frame.locator('html')).toHaveAttribute('data-theme', 'dark');
+  });
+
+  test('system boxes show their status, as in the editor', async ({ page }) => {
+    // The live examples of the docs pages draw with the same component.
+    await page.goto(droneLink(2000).replace(/^app\//, 'embed/'));
+    const orders = page.locator('.react-flow__node-systemNode', { hasText: 'Order Processing' });
+    await expect(orders.locator('.pc-system__pill')).toHaveText('Saturated');
+    await expect(orders).toContainText(/2k \/ 1\.2k rps/);
+    await expect(page.locator('.react-flow__node-systemNode', { hasText: 'Frontend' }).locator('.pc-system__pill')).toHaveText('OK');
   });
 
   test('says what is missing without a diagram', async ({ page }) => {

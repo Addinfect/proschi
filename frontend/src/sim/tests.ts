@@ -115,6 +115,7 @@ export function runTests(diagram: Diagram, analysis: Analysis = analyze(diagram)
     const { passed, message, hint } = requirement(run, r);
     return { id: `req:${i + 1}`, name: requirementName(r), category: CATEGORY[r.kind], passed, message, hint, loc: r.loc };
   });
+  results.push(...systemResults(diagram, analysis));
   const names = new Map<string, number>();
   for (const test of diagram.tests ?? []) {
     const n = (names.get(test.name) ?? 0) + 1;
@@ -122,6 +123,35 @@ export function runTests(diagram: Diagram, analysis: Analysis = analyze(diagram)
     results.push({ id: n === 1 ? `test:${test.name}` : `test:${test.name}#${n}`, name: test.name, category: 'flow', ...flowTest(run, test), loc: test.loc });
   }
   return results.map(({ hint, ...r }) => (r.passed || !hint ? r : { ...r, hint }));
+}
+
+/**
+ * One result per system that the diagram sends load to
+ * (docs/design/team-systems-and-imports.md D4): it passes when the team
+ * design takes the combined load without saturating and keeps its own
+ * latency and availability requirements.
+ */
+function systemResults(diagram: Diagram, analysis: Analysis): TestResult[] {
+  return (analysis.systems ?? [])
+    .filter((s) => s.totalInboundRps > 0 && s.contract.source !== 'none')
+    .map((s) => {
+      const system = diagram.systems?.find((x) => x.id === s.id);
+      const node = diagram.nodes.find((n) => n.id === s.id);
+      const team = node?.ownerTeam ? `the ${node.ownerTeam} team` : `the owners of ${s.id}`;
+      const problem = s.warnings.find((w) => !w.includes(' runs hot '));
+      const sat = s.contract.entries.find((e) => s.inbound.some((i) => i.entry === e.entry && i.rps > 0));
+      const room = sat && Number.isFinite(sat.saturatesAtRps) ? `; it takes at most ${formatRps(sat.saturatesAtRps)}` : '';
+      const bottleneck = s.saturated && s.busiest ? ` (their bottleneck is ${s.busiest})` : '';
+      return {
+        id: `system:${s.id}`,
+        name: `${s.id} takes what it is sent`,
+        category: s.breaches.some((b) => b.requirement.startsWith('availability')) && !s.saturated ? 'availability' : 'latency',
+        passed: !problem,
+        message: problem ?? `'${s.id}' takes ${formatRps(s.totalInboundRps)}${(s.sharedInboundRps ?? 0) > s.totalInboundRps * (1 + 1e-9) ? ` (of the ${formatRps(s.sharedInboundRps!)} it gets)` : ''}${s.contract.source === 'stub' ? '' : ' on top of its own traffic'} and holds its requirements${room}`,
+        ...(problem ? { hint: `Send it less, or ask ${team} to add capacity for it${bottleneck}` } : {}),
+        ...(system ? { loc: system.loc } : {}),
+      };
+    });
 }
 
 const CATEGORY: Record<Requirement['kind'], TestResult['category']> = {

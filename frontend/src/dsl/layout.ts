@@ -1,7 +1,7 @@
 import type { Edge, Node } from 'reactflow';
 import type { ComponentMetadata } from '../types/canvas';
-import type { Diagram } from './types';
-import { bundledElk, layoutGraph, type EdgeRoute, type LaidOutNode, type Layout } from './autoLayout';
+import type { Diagram, DiagramNode } from './types';
+import { bundledElk, layoutGraph, type EdgeRoute, type LaidOutNode, type Layout, type LayoutOptions } from './autoLayout';
 import { ElkWorkerUnavailable, workerElk } from './elkWorker';
 import { NODE_TYPE, toMetadata } from './toCanvas';
 
@@ -18,17 +18,22 @@ import { NODE_TYPE, toMetadata } from './toCanvas';
 
 let useWorker = typeof Worker !== 'undefined';
 
+/** A collapsed system box (Canvas/SystemNode.tsx): name, promise, load, entry points and controls. */
+export const SYSTEM_NODE_SIZE = { width: 300, height: 168 };
+
+const CANVAS_SIZES: LayoutOptions = { nodeSize: (node: DiagramNode) => (node.kind === 'system' ? SYSTEM_NODE_SIZE : undefined) };
+
 async function place(diagram: Diagram): Promise<Layout> {
   if (useWorker) {
     try {
-      return await layoutGraph(diagram, workerElk);
+      return await layoutGraph(diagram, workerElk, CANVAS_SIZES);
     } catch (error) {
       if (!(error instanceof ElkWorkerUnavailable)) throw error;
       console.warn('Laying out on the main thread:', error);
       useWorker = false;
     }
   }
-  return layoutGraph(diagram, bundledElk);
+  return layoutGraph(diagram, bundledElk, CANVAS_SIZES);
 }
 
 export async function layoutDiagram(diagram: Diagram): Promise<Node<ComponentMetadata>[]> {
@@ -67,7 +72,7 @@ export function provisionalLayout(diagram: Diagram): Node<ComponentMetadata>[] {
         y += rowHeight + CELL.gapY;
         rowHeight = 0;
       }
-      const size = node.kind === 'group' ? grow(place(node.id)) : { width: CELL.width, height: CELL.height };
+      const size = node.kind === 'group' ? grow(place(node.id)) : node.kind === 'system' ? SYSTEM_NODE_SIZE : { width: CELL.width, height: CELL.height };
       const position = node.position ?? { x, y };
       boxes.set(node.id, { id: node.id, position, ...size, ...(parent ? { parent } : {}) });
       x += size.width + CELL.gapX;
@@ -103,6 +108,8 @@ function toFlowNodes(diagram: Diagram, laidOut: LaidOutNode[], routes: Record<st
     if (node.kind === 'group') {
       rfNode.style = { width: box.width, height: box.height };
       rfNode.zIndex = -1;
+    } else if (node.kind === 'system') {
+      rfNode.style = { width: box.width, height: box.height };
     } else {
       rfNode.style = { width: box.width };
     }

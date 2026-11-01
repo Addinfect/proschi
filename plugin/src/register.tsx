@@ -3,10 +3,13 @@ import type { Elements, EngineInterface, On, PluginOptions, RenderElement, Rende
 
 import type { Layout } from '../../frontend/src/dsl/autoLayout'
 import type { IconStyle } from '../../tooling/src/terminal/icons'
-import { keyOf, loadDocument, missingImports, type Document, type Source } from '../../tooling/src/terminal/document'
+import { importFilePath, keyOf, loadDocument, missingImports, parseSource, type Document, type Source } from '../../tooling/src/terminal/document'
+import { CACHE_DIR, LOCK_FILE, lockedHash, parseLock, remoteError, type Lock } from '../../tooling/src/lockFormat'
+import { isRemoteSpec } from '../../frontend/src/dsl/imports'
 import { paint } from '../../tooling/src/terminal/paint'
 import { currentStepsOf, isErrorStep, playAt, STEP_MS, TRAVEL_MS } from '../../tooling/src/terminal/playback'
 import { buildScene, type Scene } from '../../tooling/src/terminal/scene'
+import { idList, systemAt, viewError, type SystemsView } from '../../tooling/src/terminal/systems'
 import type { DiagramScenario, DiagramUseCase, FlowStep } from '../../frontend/src/dsl/types'
 import { groupByEndpoint } from '../../frontend/src/playground/useCaseGroups'
 import type { PaneSource, Player } from '../types'
@@ -30,14 +33,15 @@ let icons: IconStyle = 'nerd-font'
 const PANE = 'proschi-view'
 /** The pane's one drawing, by the id its player is stored under. */
 const PANE_VIEW = `${PANE}:0`
-const IDLE: Player = { pick: '', step: 0, isPlaying: false, mode: 'diagram', explorer: false }
+const IDLE: Player = { pick: '', step: 0, isPlaying: false, mode: 'diagram', explorer: false, expanded: [] }
 const NO_SOURCE: PaneSource = { source: '' }
 const paneFile = atom({ plugin: 'proschi', key: 'paneFile' } as const, '')
 const paneSource = atom({ plugin: 'proschi', key: 'paneSource' } as const, NO_SOURCE)
 const players = atom({ plugin: 'proschi', key: 'player' } as const, IDLE)
 
-/** The pane's keys, as its Buttons' hotkeys name them. */
+/** The pane's keys, as its Buttons' hotkeys name them; the system keys where the diagram has systems. */
 const PANE_KEYS = 'p play · n/b step · r restart · e end · x explorer · d diagram · esc back to the prompt'
+const SYSTEM_KEYS = 's next system · o open/close · f focus in · u back out'
 
 /** One animation frame, in ms. */
 const FRAME = 50
@@ -63,7 +67,7 @@ export function register(on: On, options: PluginOptions): void {
   icons = chosen === 'symbols' || chosen === 'none' ? chosen : 'nerd-font'
 
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'proschi', description: 'Proschi diagrams: /proschi view <file.proschi> shows one in a pane', argumentHint: 'view <file>' })
+    await $.command.register({ name: 'proschi', description: 'Proschi diagrams: /proschi view <file.proschi> shows one in a pane', argumentHint: 'view [--expand <id>,…] [--focus <id>] <file>' })
     return next(e)
   })
 
@@ -74,11 +78,26 @@ export function register(on: On, options: PluginOptions): void {
 
   on('command.run', { command: 'proschi' }, async ($, e) => {
     const [verb, ...rest] = e.args.trim().split(/\s+/)
-    const file = rest.join(' ')
-    if (verb !== 'view' || !file) return { text: 'Usage: /proschi view <file.proschi>' }
+    const words: string[] = []
+    const view: SystemsView = {}
+    for (let i = 0; i < rest.length; i++) {
+      if (rest[i] === '--expand' || rest[i] === '--focus') {
+        const value = rest[++i]
+        if (!value || idList(value).length === 0) return { text: `Missing system id after ${rest[i - 1]}` }
+        if (rest[i - 1] === '--expand') view.expanded = [...(view.expanded ?? []), ...idList(value)]
+        else view.focus = value
+      } else words.push(rest[i])
+    }
+    const file = words.join(' ')
+    if (verb !== 'view' || !file) return { text: USAGE }
     if (!(await $.fs.exists(file))) return { text: `No such file: ${file}` }
+    if (view.expanded || view.focus !== undefined) {
+      const { diagram, errors } = parseSource(await readWithImports($, file))
+      const refused = errors.length ? undefined : viewError(diagram, view)
+      if (refused) return { text: refused }
+    }
     stop(PANE_VIEW)
-    await update($, memberOf(players, { requestId: PANE_VIEW }), () => IDLE)
+    await update($, memberOf(players, { requestId: PANE_VIEW }), () => ({ ...IDLE, expanded: view.expanded ?? [], ...(view.focus !== undefined ? { focus: view.focus } : {}) }))
     await update($, paneFile, () => file)
     await $.ui.open({ id: PANE, title: `Proschi · ${basename(file)}` })
     watch($, file)
@@ -151,6 +170,7 @@ export function register(on: On, options: PluginOptions): void {
         <ui.Text dimColor wrap="truncate-end">
           {isFocused ? PANE_KEYS : 'ctrl+x tab focuses the pane for its keys'}
         </ui.Text>
+        {isFocused && view.systems && <ui.Text dimColor wrap="truncate-end">{SYSTEM_KEYS}</ui.Text>}
       </ui.Box>
     )
   })
@@ -163,23 +183,71 @@ function proschiFile(tool: string, input: unknown): string | undefined {
   return typeof path === 'string' && path.endsWith('.proschi') ? path : undefined
 }
 
+const USAGE = 'Usage: /proschi view [--expand <system>[,<system>…]] [--focus <system>] <file.proschi>'
+
 const basename = (path: string) => path.split('/').pop() ?? path
 const dirname = (path: string) => path.slice(0, Math.max(0, path.lastIndexOf('/')))
+
+/** The project root imports are confined to: the folder of the nearest proschi.json, else the git root, else the file's folder (tooling/src/imports.ts). */
+async function projectRoot($: EngineInterface, dir: string): Promise<string> {
+  for (let current = dir; ; current = dirname(current)) {
+    if ((await $.fs.exists(`${current}/proschi.json`)) || (await $.fs.exists(`${current}/.git`))) return current || '/'
+    if (!current || current === '/') return dir
+  }
+}
+
+/** Why an import was not read, by its key: a remote one not synced, as `proschi check` says it. */
+const importReasons = new Map<string, string>()
 
 /** A file with the files it imports, keyed relative to it as the editor resolves them (tooling/src/share.ts). */
 async function readWithImports($: EngineInterface, file: string): Promise<Source> {
   const name = basename(file)
   const dir = dirname(file)
+  const root = await projectRoot($, dir)
   const doc: Source = { source: await $.fs.read(file), path: name, imports: {} }
+  const lock: { read?: Promise<Lock | undefined> } = {}
   for (let round = 0; round < 8; round++) {
     const missing = missingImports(doc).filter(key => key !== name && !(key in doc.imports!))
     if (missing.length === 0) break
     for (const key of missing) {
-      const path = dir ? `${dir}/${key}` : key
-      doc.imports![key] = (await $.fs.exists(path)) ? await $.fs.read(path) : ''
+      importReasons.delete(key)
+      if (isRemoteSpec(key)) {
+        doc.imports![key] = await readRemote($, root, key, (lock.read ??= readLock($, root))).catch((error: unknown) => {
+          importReasons.set(key, error instanceof Error ? error.message : String(error))
+          return ''
+        })
+        continue
+      }
+      // Paths outside the project are never read; they draw as missing.
+      const path = importFilePath(dir, root, key)
+      doc.imports![key] = path && (await $.fs.exists(path)) ? await $.fs.read(path) : ''
     }
   }
   return doc
+}
+
+async function readLock($: EngineInterface, root: string): Promise<Lock | undefined> {
+  const file = `${root}/${LOCK_FILE}`
+  return (await $.fs.exists(file)) ? parseLock(await $.fs.read(file)) : undefined
+}
+
+/**
+ * A remote import as every command but sync reads it (tooling/src/imports.ts):
+ * from the bytes proschi.lock pins in .proschi/cache, their sha256 checked;
+ * never the network.
+ */
+async function readRemote($: EngineInterface, root: string, spec: string, locked: Promise<Lock | undefined>): Promise<string> {
+  const lock = await locked
+  if (!lock) throw remoteError.noLock(spec)
+  const hash = lockedHash(lock, spec)
+  if (!hash) throw remoteError.notLocked(spec)
+  const file = `${root}/${CACHE_DIR}/${hash}`
+  if (!(await $.fs.exists(file))) throw remoteError.notCached(spec)
+  const { base64 } = (await $.fs.read(file, { as: 'bytes' })) as { base64: string }
+  const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0))
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))
+  if ([...digest].map(b => b.toString(16).padStart(2, '0')).join('') !== hash) throw remoteError.altered(spec)
+  return new TextDecoder().decode(bytes)
 }
 
 /** Redraws the pane when its file changes. */
@@ -235,6 +303,9 @@ interface View {
   /** The keyed Box around the Raster: what a press scrolls the pane to, the Raster itself being no scroll target. */
   anchorKey: string
   scene: Scene
+  /** System badges and the one the system keys act on, for the frames the animation paints. */
+  systems: Document['systems']
+  selected?: string
   /** The width of the bars under the diagram: the diagram's, at least as wide as their controls want where the terminal has room. */
   width: number
   overlay: Document['overlay']
@@ -250,6 +321,9 @@ function normal(p: Partial<Player> | undefined): Player {
     isPlaying: p?.isPlaying === true && p.mode === 'play',
     mode: p?.mode === 'play' ? 'play' : 'diagram',
     explorer: p?.explorer === true,
+    expanded: Array.isArray(p?.expanded) ? p.expanded.filter((id): id is string => typeof id === 'string') : [],
+    ...(typeof p?.focus === 'string' ? { focus: p.focus } : {}),
+    ...(typeof p?.selected === 'string' ? { selected: p.selected } : {}),
   }
 }
 
@@ -266,8 +340,12 @@ const PLAY = ' ▶ Play '
 const BARS_WIDTH = 80
 
 /** The drawing of one document: the diagram with its use case picker or player and its links, or why it cannot be drawn. `file` is where the source was read from, if anywhere. */
-async function diagramView($: EngineInterface, d: Draw, viewId: string, source: Source, file?: string): Promise<{ element: RenderElement } | { error: string }> {
+async function diagramView($: EngineInterface, d: Draw, viewId: string, written: Source, file?: string): Promise<{ element: RenderElement; systems: boolean } | { error: string }> {
   const { ui } = d
+  // The systems the player opened or focused into are part of what is laid out.
+  const player = normal(await read($, memberOf(players, { requestId: viewId })))
+  const shown: SystemsView = { ...(player.expanded.length ? { expanded: player.expanded } : {}), ...(player.focus !== undefined ? { focus: player.focus } : {}) }
+  const source: Source = shown.expanded || shown.focus !== undefined ? { ...written, view: shown } : written
   const key = keyOf(source)
   let doc = documents.get(key)
   if (!doc) {
@@ -284,7 +362,7 @@ async function diagramView($: EngineInterface, d: Draw, viewId: string, source: 
   const layout = layouts.get(key)
   if (!layout) {
     requestLayout($, key, source)
-    return { element: <ui.Text dimColor>Laying out {doc.diagram.title ?? 'the diagram'}…</ui.Text> }
+    return { element: <ui.Text dimColor>Laying out {doc.diagram.title ?? 'the diagram'}…</ui.Text>, systems: false }
   }
   if ('error' in layout) return { error: `Proschi could not lay ${file ?? 'this diagram'} out: ${layout.error}` }
 
@@ -297,20 +375,22 @@ async function diagramView($: EngineInterface, d: Draw, viewId: string, source: 
   }
 
   const picks = doc.diagram.useCases.flatMap(u => u.scenarios.map(s => pickOf(u, s)))
-  const player = normal(await read($, memberOf(players, { requestId: viewId })))
   const pick = picks.find(p => p.value === player.pick) ?? picks[0]
   const playing = player.mode === 'play' ? pick : undefined
   const steps = playing?.scenario.steps ?? []
   const step = Math.max(0, Math.min(player.step, steps.length - 1))
   const width = Math.min(Math.max(40, d.columns), Math.max(scene.columns, BARS_WIDTH))
-  const view: View = { d, viewId, rasterKey: `d-${viewId}`, anchorKey: `at-${viewId}`, scene, width, overlay: doc.overlay, inPane: d.requestId === PANE }
+  const systems = selectable(scene, player.focus)
+  const selected = systems.find(s => s.path === player.selected) ?? systems[0]
+  const view: View = { d, viewId, rasterKey: `d-${viewId}`, anchorKey: `at-${viewId}`, scene, width, overlay: doc.overlay, systems: doc.systems, ...(selected ? { selected: selected.id } : {}), inPane: d.requestId === PANE }
   if (playing && player.isPlaying && !timers.has(viewId)) animate($, view, steps)
 
   // While a step animates, its frames are blitted in place; a drawing starts it from the beginning.
   const progress = timers.has(viewId) ? 0 : 100
-  const grid = paint(scene, { overlay: doc.overlay, icons, ...(steps.length > 0 ? { play: playAt(scene, steps, step, progress) } : {}) })
+  const grid = paint(scene, { overlay: doc.overlay, icons, systems: doc.systems, ...(view.selected ? { selected: view.selected } : {}), ...(steps.length > 0 ? { play: playAt(scene, steps, step, progress) } : {}) })
   const link = doc.link(playing ? { useCase: playing.useCase.id, ...(playing.useCase.scenarios.length > 1 ? { scenario: playing.scenario.id } : {}), step } : undefined)
-  const lost = lostImports(source, key)
+  const lost = lostImports(written, keyOf(written))
+  const hasSystems = systems.length > 0 || player.focus !== undefined
   // Wide enough for the long labels, else the short ones.
   const roomy = view.width >= 79
 
@@ -330,13 +410,25 @@ async function diagramView($: EngineInterface, d: Draw, viewId: string, source: 
             ↔ {grid.columns} columns wide, wider than the {d.columns} here: {view.inPane ? 'widen the window' : 'use ⛶ Focus or a wider window'} to see it whole.
           </ui.Text>
         )}
-        {lost.length > 0 && (
+        {lost.some(name => !importReasons.has(name)) && (
           <ui.Text dimColor wrap="truncate-end">
-            ⚠ Not found, so drawn as plain boxes: {lost.join(', ')}
+            ⚠ Not found, so drawn as plain boxes: {lost.filter(name => !importReasons.has(name)).join(', ')}
           </ui.Text>
         )}
+        {lost.filter(name => importReasons.has(name)).map(name => (
+          <ui.Text key={`lost-${name}`} dimColor>
+            ⚠ {importReasons.get(name)}
+          </ui.Text>
+        ))}
+        {doc.notes.map(note => (
+          <ui.Text color="yellow">
+            ⚠ {note.text}
+            {note.hint && <ui.Text dimColor> → {note.hint}</ui.Text>}
+          </ui.Text>
+        ))}
         <ui.Raster key={view.rasterKey} columns={grid.columns} rows={grid.rows} cells={grid.toBase64()} />
       </ui.Box>
+      {hasSystems && !playing && systemBar($, view, doc, systems, selected, player)}
       {playing ? stepPanel($, view, playing, step, player) : pick && useCaseBar($, view, doc, pick, player)}
       <ui.Box flexDirection="row" gap={1} borderStyle="round" borderColor="gray" paddingX={1} width={view.width}>
         <ui.Button key={`src-${viewId}`} label={roomy ? '⧉ Copy source' : '⧉ Source'} onPress={press => void copy($, press.surface, source.source, 'the Proschi source')} />
@@ -345,7 +437,81 @@ async function diagramView($: EngineInterface, d: Draw, viewId: string, source: 
         {!view.inPane && <ui.Button key={`focus-${viewId}`} label="⛶ Focus" onPress={() => focus($, view, file ? basename(file) : (doc.diagram.title ?? 'diagram'), file ? { file } : { source })} />}
       </ui.Box>
     </ui.Box>
-  ) }
+  ), systems: hasSystems }
+}
+
+/** A system the keys can act on: a collapsed box or an expanded frame, by its id in the scene and its path from the root document. */
+interface Selectable {
+  id: string
+  path: string
+  name: string
+  expanded: boolean
+}
+
+function selectable(scene: Scene, focus: string | undefined): Selectable[] {
+  return [...scene.nodes.values()]
+    .map(n => n.node)
+    .filter(n => n.kind === 'system' || (n.kind === 'group' && n.system === n.id))
+    .map(n => ({ id: n.id, path: focus !== undefined ? `${focus}.${n.id}` : n.id, name: n.name, expanded: n.kind === 'group' }))
+}
+
+/**
+ * The systems row: which system the keys act on, and opening it in place,
+ * focusing into it, or back out to the diagram around it
+ * (docs/design/team-systems-and-imports.md D6).
+ */
+function systemBar($: EngineInterface, view: View, doc: Document, systems: Selectable[], selected: Selectable | undefined, player: Player): RenderElement {
+  const { ui } = view.d
+  const design = selected !== undefined && !!systemAt(doc.root, selected.path)?.diagram
+  const next = () => {
+    const at = systems.findIndex(s => s.path === selected?.path)
+    const to = systems[(at + 1) % systems.length]
+    if (to) void setPlayer($, view, p => ({ ...p, selected: to.path }))
+  }
+  const toggle = () => {
+    if (!selected || !design) return
+    const open = player.expanded.includes(selected.path) || selected.expanded
+    void setPlayer($, view, p => ({
+      ...p,
+      // Closing a system closes the ones inside it too.
+      expanded: open ? p.expanded.filter(id => id !== selected.path && !id.startsWith(`${selected.path}.`)) : [...p.expanded, selected.path],
+      selected: selected.path,
+    }))
+  }
+  const enter = () => {
+    if (!selected || !design) return
+    void setPlayer($, view, p => ({ ...p, focus: selected.path, selected: undefined, pick: '', mode: 'diagram', isPlaying: false }))
+  }
+  const leave = () => {
+    const focus = player.focus
+    if (focus === undefined) return
+    const up = focus.includes('.') ? focus.slice(0, focus.lastIndexOf('.')) : undefined
+    void setPlayer($, view, p => {
+      const { focus: _focus, ...rest } = p
+      void _focus
+      return { ...rest, ...(up !== undefined ? { focus: up } : {}), selected: focus, pick: '', mode: 'diagram', isPlaying: false }
+    })
+  }
+  const open = selected !== undefined && (selected.expanded || player.expanded.includes(selected.path))
+  return (
+    <ui.Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} width={view.width}>
+      {player.focus !== undefined && (
+        <ui.Text dimColor wrap="truncate-end">
+          Inside {player.focus.split('.').join(' › ')} · {doc.diagram.title ?? 'its design'}
+        </ui.Text>
+      )}
+      <ui.Box flexDirection="row" gap={1} alignItems="center" flexWrap="wrap">
+        <ui.Text bold>System</ui.Text>
+        <ui.Text color={PINK} wrap="truncate-end">
+          {selected ? `${selected.name} (${selected.path})` : 'none here'}
+        </ui.Text>
+        {systems.length > 1 && <ui.Button key={`sys-next-${view.viewId}`} label="⇥ Next" {...hotkey(view, 's')} onPress={next} />}
+        {selected && design && <ui.Button key={`sys-open-${view.viewId}`} label={open ? '⊟ Collapse' : '⊞ Expand'} {...hotkey(view, 'o')} onPress={toggle} />}
+        {selected && design && <ui.Button key={`sys-focus-${view.viewId}`} label="⤢ Focus in" {...hotkey(view, 'f')} onPress={enter} />}
+        {player.focus !== undefined && <ui.Button key={`sys-back-${view.viewId}`} label="↑ Back out" {...hotkey(view, 'u')} onPress={leave} />}
+      </ui.Box>
+    </ui.Box>
+  )
 }
 
 /** The imports a document names that were not found, which it draws as plain boxes: none were read for a block in a reply, and a file's were read as empty. */
@@ -720,7 +886,7 @@ function animate($: EngineInterface, view: View, steps: FlowStep[]): void {
     if (started < 0) started = now
     const elapsed = now - started
     const play = playAt(view.scene, steps, step, Math.min(100, (elapsed / TRAVEL_MS) * 100), tick++)
-    await $.ui.blit({ requestId: view.d.requestId, key: view.rasterKey, cells: paint(view.scene, { overlay: view.overlay, icons, play }).toBase64() })
+    await $.ui.blit({ requestId: view.d.requestId, key: view.rasterKey, cells: paint(view.scene, { overlay: view.overlay, icons, systems: view.systems, ...(view.selected ? { selected: view.selected } : {}), play }).toBase64() })
     if (!player.isPlaying) {
       if (elapsed >= TRAVEL_MS) stop(view.viewId)
       return

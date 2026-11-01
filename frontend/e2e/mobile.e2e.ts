@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import type { Page } from '@playwright/test';
 import { expect, test } from './fixtures';
 import { mockProfile, PROFILE } from './profile';
@@ -12,8 +12,8 @@ import { mockProfile, PROFILE } from './profile';
 
 const DIST = new URL('../dist/', import.meta.url);
 
-/** The docs pages in the build (plugins/docsSite.ts writes docs/<slug>/index.html). */
-const DOCS_PAGES = ['docs/', ...readdirSync(new URL('docs/', DIST), { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => `docs/${d.name}/`)];
+/** The docs pages, from docs/site.json (plugins/docsSite.ts writes each to docs/<slug>/index.html). */
+const DOCS_PAGES = (JSON.parse(readFileSync(new URL('../../docs/site.json', import.meta.url), 'utf8')) as { pages: { slug: string }[] }).pages.map((p) => `docs/${p.slug ? `${p.slug}/` : ''}`);
 
 /** The elements whose box crosses the viewport's edges, unless an ancestor inside the viewport clips or scrolls them. */
 function offenders(): string[] {
@@ -78,6 +78,7 @@ test.describe('no sideways scrolling on a phone', () => {
     await menu.locator('summary').click();
     const links = menu.getByRole('link');
     await expect(links.filter({ hasText: 'Practice' })).toBeVisible();
+    await expect(links.filter({ hasText: 'Blog' })).toBeVisible();
     // Tap targets in the menu are at least 44px tall.
     for (const box of await links.evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height))) expect(box).toBeGreaterThanOrEqual(44);
     await expectNoHorizontalOverflow(page, './ with the menu open');

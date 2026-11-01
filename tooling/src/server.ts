@@ -3,7 +3,8 @@
  * gets the same diagnostics as the web editor, plus completion, hover,
  * go-to-definition, references, an outline, formatting and links on import
  * paths, and failing requirements and tests as warnings (source `proschi-test`). Imports resolve from disk relative to the document, preferring the
- * text of open (possibly unsaved) documents.
+ * text of open (possibly unsaved) documents, confined to the project root;
+ * git and https imports come from the cache of `proschi imports sync`.
  */
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
@@ -48,12 +49,14 @@ function openText(path: string): string | undefined {
   return documents.all().find((d) => pathOf(d.uri) === path)?.getText();
 }
 
-const resolve = fileResolver(openText);
-
 function analysisOf(doc: TextDocument): Analysis {
   const cached = cache.get(doc.uri);
   if (cached?.version === doc.version) return cached.analysis;
-  const analysis = analyze(doc.getText(), { path: pathOf(doc.uri), resolve });
+  const path = pathOf(doc.uri);
+  // Per document: its project root confines its imports; remote ones come from the sync cache only.
+  const resolve = fileResolver({ entry: path, read: openText });
+  const analysis = analyze(doc.getText(), { path, resolve });
+  resolve.explain(analysis.result);
   const files = new Set((analysis.result.imports ?? []).flatMap((i) => (i.resolved ? [i.resolved] : [])));
   cache.set(doc.uri, { version: doc.version, analysis, files });
   return analysis;

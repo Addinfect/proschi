@@ -2,7 +2,7 @@ import type { Page } from '@playwright/test';
 import { expect, test } from './fixtures';
 
 /** The site's own pages; the header is the same on each, the footer on those that have one. */
-const PAGES = ['./', 'docs/', 'app/', 'practice/'];
+const PAGES = ['./', 'docs/', 'blog/', 'app/', 'practice/'];
 
 const theme = (page: Page) => page.evaluate(() => document.documentElement.dataset.theme);
 const toggle = (page: Page) => page.locator('.ps-header').getByRole('button', { name: /^Theme:/ });
@@ -13,14 +13,14 @@ test.describe('shared header and footer', () => {
     for (const path of PAGES) {
       await page.goto(path);
       const nav = page.getByRole('navigation', { name: 'Main' });
-      await expect(nav.getByRole('link')).toHaveText([/Docs/, 'Practice', /GitHub/]);
+      await expect(nav.getByRole('link')).toHaveText([/Docs/, 'Practice', 'Blog', /GitHub/]);
       await expect(page.getByRole('link', { name: 'Proschi home' }).first()).toBeVisible();
       await expect(toggle(page)).toBeVisible();
       const footer = page.getByRole('contentinfo');
       if (path !== 'app/') footers.push(await footer.getByRole('link').allTextContents());
       else await expect(footer).toHaveCount(0);
     }
-    expect(footers).toHaveLength(3);
+    expect(footers).toHaveLength(4);
     expect(new Set(footers.map((f) => f.join('|'))).size).toBe(1);
     await expect(page.getByRole('contentinfo').getByRole('link', { name: 'Contribute' })).toHaveAttribute(
       'href',
@@ -66,7 +66,7 @@ test.describe('shared header on a phone', () => {
     await expect(page.locator('.ps-header .ps-nav')).toBeHidden();
     await menu.locator('summary').click();
     const links = menu.getByRole('navigation', { name: 'Main' }).getByRole('link');
-    await expect(links).toHaveText([/Docs/, 'Practice', /GitHub/, 'Editor']);
+    await expect(links).toHaveText([/Docs/, 'Practice', 'Blog', /GitHub/, 'Editor']);
     await page.keyboard.press('Escape');
     await expect(links.first()).toBeHidden();
     await expect(menu.locator('summary')).toBeFocused();

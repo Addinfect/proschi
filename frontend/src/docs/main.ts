@@ -1,6 +1,7 @@
 import '../design/site.css';
 import './docs.css';
 import { enhance } from '../design/enhance';
+import { anchorRedirect } from './anchorRedirect';
 
 /*
  * The docs pages are static HTML (plugins/docsSite.ts) and read fine without
@@ -14,6 +15,19 @@ enhance();
 
 const docs = document.querySelector<HTMLElement>('.docs');
 const siteRoot = docs?.dataset.siteRoot ?? '../';
+
+// ---------- old anchors that moved to another page ----------
+
+const redirects = docs?.dataset.anchorRedirects;
+if (redirects) {
+  const map = JSON.parse(redirects) as Record<string, string>;
+  const follow = () => {
+    const to = location.hash && anchorRedirect(map, location.hash, new URL(`${siteRoot}docs/`, location.href).href);
+    if (to) location.replace(to);
+  };
+  follow();
+  window.addEventListener('hashchange', follow);
+}
 
 // ---------- the sidebar drawer (phones) ----------
 

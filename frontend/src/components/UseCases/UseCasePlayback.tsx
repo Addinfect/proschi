@@ -25,6 +25,7 @@ import type { FlowStep } from '../../dsl/types';
 import ComponentNode from '../Canvas/ComponentNode';
 import TextNode from '../Canvas/TextNode';
 import GroupNode from '../Canvas/GroupNode';
+import SystemNode from '../Canvas/SystemNode';
 import { PlaybackClock, PlaybackClockContext, usePlaybackProgress } from './playbackClock';
 import { PLAYBACK_EDGE_TYPES, currentStepsOf, isErrorStep, playbackView, type PlaybackView, type PlayedUseCase } from './playbackView';
 
@@ -32,6 +33,7 @@ const nodeTypes = {
   componentNode: ComponentNode,
   textNode: TextNode,
   groupNode: GroupNode,
+  systemNode: SystemNode,
 };
 
 /** How a body format reads in the step card. */

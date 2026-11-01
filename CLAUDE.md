@@ -50,5 +50,7 @@ Live at <https://proschi.app/>.
   the changelog or the versions by hand. Merging release-please's release PR
   tags `tooling-v<version>` and publishes npm, the VS Code Marketplace, Open
   VSX and JetBrains (`.github/workflows/release-please.yml`).
+- Before merging release-please's release PR, run `/blog-post`
+  (`.claude/skills/blog-post/`) and include the post (`blog/`) in that PR.
 - Hard-coded problem counts (landing page, e2e tests, practice and tooling
   tests, `docs/PRACTICE.md`) must change whenever a problem is added.

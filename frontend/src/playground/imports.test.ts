@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { parse } from '../dsl';
-import { BLANK_SOURCE, addDoc, addFile, fileNameOf, initialState, renameFile, selectDoc, updateCurrent, type SavedDiagram } from './documents';
-import { filesResolver, importableFiles, usedImports } from './imports';
+import { BLANK_SOURCE, addDoc, addFile, addFiles, fileNameOf, initialState, renameFile, selectDoc, updateCurrent, updateDoc, type SavedDiagram } from './documents';
+import { filesResolver, importableFiles, teamFileOf, usedImports } from './imports';
+import { DRONE_ORG_PATH, DRONE_TEAM_FILES, droneOrgSource } from './droneStartup';
 
 const doc = (id: string, source: string, extra: Partial<SavedDiagram> = {}): SavedDiagram => ({ id, source, updatedAt: '2026-01-01', ...extra });
 
@@ -101,5 +102,39 @@ describe('opening a share link with imports', () => {
     const stored = { docs: [{ id: 'a', source: 'same', updatedAt: 't' }], currentId: 'a' };
     const state = initialState({ ...base, stored, sharedSource: 'same', sharedImports: imports });
     expect(state.docs).toEqual([{ id: 'a', source: 'same', updatedAt: 't', imports, fileName: 'untitled.proschi' }]);
+  });
+});
+
+describe('team files in the browser', () => {
+  it('counts the team files of systems as used, so a share link carries them', () => {
+    const files = { ...DRONE_TEAM_FILES, 'unused.proschi': 'x' };
+    const result = parse(droneOrgSource(), { path: DRONE_ORG_PATH, resolve: filesResolver(files, DRONE_ORG_PATH) });
+    expect(Object.keys(usedImports(result, files, DRONE_ORG_PATH)).sort()).toEqual(Object.keys(DRONE_TEAM_FILES).sort());
+  });
+
+  it('opens the team files of an example as diagrams, once', () => {
+    let n = 0;
+    const ids = () => `d${n++}`;
+    let state = addFiles(addDoc({ docs: [], currentId: '' }, droneOrgSource(), () => 't', ids), DRONE_TEAM_FILES, () => 't', ids);
+    expect(state.docs.map((d) => d.fileName)).toEqual([DRONE_ORG_PATH, ...Object.keys(DRONE_TEAM_FILES)]);
+    expect(state.currentId).toBe('d0');
+    // Again: a second org diagram, the same team files.
+    state = addFiles(addDoc(state, droneOrgSource(), () => 't', ids), DRONE_TEAM_FILES, () => 't', ids);
+    expect(state.docs.length).toBe(2 + Object.keys(DRONE_TEAM_FILES).length);
+  });
+
+  it('edits a team file saved in this browser, and only reads one that came with a link or from a remote source', () => {
+    const org = doc('org', droneOrgSource());
+    const orders = doc('o', 'title "Orders"', { fileName: 'teams/orders.proschi' });
+    const team = teamFileOf([org, orders], org, 'teams/orders.proschi');
+    expect(team).toEqual({ path: 'teams/orders.proschi', source: 'title "Orders"', docId: 'o' });
+    const edited = updateDoc({ docs: [org, orders], currentId: 'org' }, 'o', 'title "Orders v2"', () => 'later');
+    expect(edited.docs[1]).toMatchObject({ source: 'title "Orders v2"', updatedAt: 'later' });
+    expect(edited.currentId).toBe('org');
+
+    const shared = { ...org, imports: { 'teams/orders.proschi': 'title "Shared"', 'git:github.com/acme/orders//team.proschi@v1': 'title "Remote"' } };
+    expect(teamFileOf([shared, orders], shared, 'teams/orders.proschi')).toMatchObject({ source: 'title "Shared"', readOnly: expect.stringContaining('link') });
+    expect(teamFileOf([shared], shared, 'git:github.com/acme/orders//team.proschi@v1')).toMatchObject({ readOnly: expect.stringContaining('remote') });
+    expect(teamFileOf([org], org, 'teams/missing.proschi')).toBeUndefined();
   });
 });

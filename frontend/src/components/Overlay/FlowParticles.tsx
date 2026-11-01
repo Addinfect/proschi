@@ -21,9 +21,17 @@ interface Particle {
 
 const MAX = 240;
 
+/** A drawn connection's line, and whether it runs against the flow. */
+interface Route {
+  path: SVGPathElement;
+  length: number;
+  reversed: boolean;
+}
+
 /**
- * Requests as dots flowing along the canvas's connections, from a node's
- * bottom to the next one's top: more dots for more traffic, hollow ones for
+ * Requests as dots flowing along the canvas's connections, on the line each
+ * connection is drawn with (or from a node's bottom to the next one's top
+ * when none is drawn between them): more dots for more traffic, hollow ones for
  * async work, and red ones falling off nodes past 100%. Rendered inside
  * `<ReactFlow>`, it follows pan and zoom; it draws nothing with reduced motion.
  */
@@ -50,7 +58,7 @@ export default function FlowParticles({ flows, nodes, speed = 1 }: FlowParticles
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       const { flows: F, nodes: N, speed: S } = live.current;
-      const { transform, nodeInternals } = store.getState();
+      const { transform, nodeInternals, edges } = store.getState();
       const [tx, ty, zoom] = transform;
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       const w = el.clientWidth;
@@ -63,6 +71,17 @@ export default function FlowParticles({ flows, nodes, speed = 1 }: FlowParticles
       g.setTransform(zoom * dpr, 0, 0, zoom * dpr, tx * dpr, ty * dpr);
       g.clearRect(-tx / zoom, -ty / zoom, w / zoom, h / zoom);
       const box = (id: string) => boxOf(nodeInternals.get(id));
+      // The drawn line between two nodes, looked up once a frame: the layout routes it around other boxes.
+      const routes = new Map<string, Route | undefined>();
+      const routeOf = (from: string, to: string): Route | undefined => {
+        const key = `${from}>${to}`;
+        if (!routes.has(key)) {
+          const edge = edges.find((e) => (e.source === from && e.target === to) || (e.source === to && e.target === from));
+          const path = edge && el.closest('.react-flow')?.querySelector<SVGPathElement>(`[data-testid="rf__edge-${CSS.escape(edge.id)}"] .react-flow__edge-path`);
+          routes.set(key, path ? { path, length: path.getTotalLength(), reversed: edge.source !== from } : undefined);
+        }
+        return routes.get(key);
+      };
 
       if (!document.hidden) {
         for (const f of F) {
@@ -106,7 +125,8 @@ export default function FlowParticles({ flows, nodes, speed = 1 }: FlowParticles
           particles.splice(i, 1);
           continue;
         }
-        const { x, y } = along(a, b, q.t);
+        const route = routeOf(q.from, q.to);
+        const { x, y } = route ? route.path.getPointAtLength((route.reversed ? 1 - q.t : q.t) * route.length) : along(a, b, q.t);
         g.beginPath();
         g.arc(x, y, 4, 0, Math.PI * 2);
         if (q.async) {

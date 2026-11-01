@@ -3,6 +3,7 @@ import type { Edge, EdgeTypes, Node } from 'reactflow';
 import 'reactflow/dist/style.css';
 import ComponentNode from '../Canvas/ComponentNode';
 import GroupNode from '../Canvas/GroupNode';
+import SystemNode from '../Canvas/SystemNode';
 import TextNode from '../Canvas/TextNode';
 import RoutedEdge from '../Canvas/RoutedEdge';
 import Legend from '../Canvas/Legend';
@@ -14,7 +15,7 @@ import { FIT_VIEW_OPTIONS, useFitOnChange } from './useFitOnChange';
  * editing it through the canvas (the HLD overview, the practice editor).
  */
 
-const nodeTypes = { componentNode: ComponentNode, groupNode: GroupNode, textNode: TextNode };
+const nodeTypes = { componentNode: ComponentNode, groupNode: GroupNode, systemNode: SystemNode, textNode: TextNode };
 /** Plain edges follow their layout route (RoutedEdge). */
 const ROUTED_EDGE_TYPES: EdgeTypes = { default: RoutedEdge };
 
