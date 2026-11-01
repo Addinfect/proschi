@@ -9,6 +9,13 @@ deployed from `main` and ships with the same changes. From 0.12.0 on,
 [release-please](https://github.com/googleapis/release-please) writes each
 section from the conventional commit titles of the merged pull requests.
 
+## [0.15.0](https://github.com/gvart/proschi/compare/tooling-v0.14.0...tooling-v0.15.0) (2026-11-01)
+
+
+### Added
+
+* **editor:** diagrams sidebar with folders, quick open and a leaner header ([#171](https://github.com/gvart/proschi/issues/171)) ([82d1c47](https://github.com/gvart/proschi/commit/82d1c475fed82cf6c1e23bbdf9237aadaddc520d))
+
 ## [0.14.0](https://github.com/gvart/proschi/compare/tooling-v0.13.0...tooling-v0.14.0) (2026-11-01)
 
 
