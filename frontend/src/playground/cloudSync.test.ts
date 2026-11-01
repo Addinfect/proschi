@@ -65,6 +65,8 @@ const initial = (): DocumentState => ({ docs: [{ id: 'a', source: 'title "A"\n',
 let server: FakeServer;
 let store: DocStore;
 let saved: StoredSync | null;
+/** The diagrams saved with `saved`. */
+let savedDocs: DocumentState | null;
 let conflicts: string[][];
 let signedOut: number;
 let sync: DocSync;
@@ -74,7 +76,13 @@ function makeSync(userId = 'u1') {
     store,
     transport: server,
     userId,
-    storage: { load: () => saved, save: (v) => (saved = JSON.parse(JSON.stringify(v)) as StoredSync) },
+    storage: {
+      load: () => saved,
+      save: (v, docs) => {
+        saved = JSON.parse(JSON.stringify(v)) as StoredSync;
+        savedDocs = docs;
+      },
+    },
     timers: { set: (run, ms) => setTimeout(run, ms), clear: (h) => clearTimeout(h as ReturnType<typeof setTimeout>) },
     onConflict: (titles) => conflicts.push(titles),
     onSignedOut: () => signedOut++,
@@ -95,6 +103,7 @@ describe('DocSync', () => {
     server = new FakeServer();
     store = createDocStore(initial());
     saved = null;
+    savedDocs = null;
     conflicts = [];
     signedOut = 0;
   });
@@ -112,6 +121,21 @@ describe('DocSync', () => {
     expect(server.docs.get('a')?.source).toBe('title "A"\n');
     expect(sync.getStatus()).toEqual({ kind: 'saved' });
     expect(saved?.meta?.docs.a.version).toBe(1);
+  });
+
+  it('saves its state with the diagrams it pulled, so closing the tab at once never reads as deleting them', async () => {
+    server.write({ id: 'b', name: 'b.proschi', source: 'title "B"\n', imports: null, version: 1, updatedAt: 0, deletedAt: null });
+    makeSync().start();
+    await settle();
+    expect(Object.keys(saved?.meta?.docs ?? {}).sort()).toEqual(['a', 'b']);
+    expect(savedDocs?.docs.map((d) => d.id).sort()).toEqual(['a', 'b']);
+    // The next load, from what was saved: nothing to delete.
+    store = createDocStore(savedDocs!);
+    server.calls = [];
+    makeSync().start();
+    await settle();
+    expect(server.calls.filter((c) => !c.startsWith('list'))).toEqual([]);
+    expect(server.docs.get('b')?.deletedAt).toBeNull();
   });
 
   it('pushes edits about 2 s after the last change, not on every keystroke', async () => {
@@ -136,6 +160,15 @@ describe('DocSync', () => {
     type('title "Bye"\n');
     await sync.flush(true);
     expect(server.docs.get('a')?.source).toBe('title "Bye"\n');
+  });
+
+  it('pushedVersion pushes the edits first, to tag a version of what is on screen', async () => {
+    makeSync().start();
+    await settle();
+    type('title "Tagged"\n');
+    expect(await sync.pushedVersion('a')).toBe(2);
+    expect(server.docs.get('a')?.source).toBe('title "Tagged"\n');
+    expect(await sync.pushedVersion('nope')).toBeNull();
   });
 
   it('deletes with the base version, and learns deletions made elsewhere', async () => {

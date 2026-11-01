@@ -28,7 +28,7 @@ const USERS = {
 
 function detail(blocked: boolean) {
   return {
-    user: { id: USER, displayName: 'spammer9000', publicProfile: false, dailyGoal: 10, createdAt: 1_800_000_000, lastSeenDay: today, blockedAt: blocked ? 1_800_000_100 : null, blockedReason: blocked ? 'spam' : null },
+    user: { id: USER, displayName: 'spammer9000', publicProfile: false, dailyGoal: 10, createdAt: 1_800_000_000, lastSeenDay: today, blockedAt: blocked ? 1_800_000_100 : null, blockedReason: blocked ? 'spam' : null, plan: 'free' },
     identities: [{ provider: 'google', subject: 'g-77' }],
     sessions: blocked ? [] : [{ kind: 'web', count: 1, lastCreatedAt: 1_800_000_000 }],
     progress: [],
@@ -101,6 +101,7 @@ test.describe('admin panel', () => {
     await page.getByRole('button', { name: 'spammer9000' }).click();
     await expect(page).toHaveURL(new RegExp(`#/users/${USER}$`));
     await expect(page.getByRole('heading', { name: 'spammer9000' })).toBeVisible();
+    await expect(page.getByText('free plan')).toBeVisible();
 
     await page.getByLabel('Reason for blocking').fill('spam');
     page.once('dialog', (dialog) => void dialog.accept());

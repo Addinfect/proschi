@@ -1,9 +1,10 @@
+import { parse } from './parser';
 import type { ImportResolver } from './types';
 
 /**
  * Helpers for resolving `import` paths without a file system, e.g. against
  * documents saved in the browser or files carried in a share link, and the
- * syntax of remote import sources (`git:` and `https://`), shared with the CLI.
+ * syntax of remote import sources (`git:`, `https://` and `cloud:`), shared with the CLI.
  */
 
 /**
@@ -31,7 +32,28 @@ export interface HttpsSpec {
   url: string;
 }
 
-export type RemoteSpec = GitSpec | HttpsSpec;
+/**
+ * `cloud:<name>[:<tag>][//<path>]`: a saved version of a diagram in the
+ * signed-in user's own account (docs/design/versions-and-cloud.md). `path`
+ * names a file saved with that version, relative to the diagram.
+ */
+export interface CloudSpec {
+  kind: 'cloud';
+  /** The diagram's file name without `.proschi`: `/`-separated segments of letters, digits, '.', '_', '+' and '-'. */
+  name: string;
+  /** A version tag; `latest` is the newest saved version. */
+  tag: string;
+  path?: string;
+}
+
+export type RemoteSpec = GitSpec | HttpsSpec | CloudSpec;
+
+/** The tag `cloud:<name>` means: the newest saved version, never the unsaved draft. */
+export const LATEST_TAG = 'latest';
+/** What a version tag may look like, e.g. a date like 2026-11-01 or v2. */
+export const VERSION_TAG = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const CLOUD_NAME_SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9._+-]*$/;
+const MAX_CLOUD_NAME = 200;
 
 /** Longest import spec accepted, remote or local. */
 const MAX_SPEC_LENGTH = 1024;
@@ -104,8 +126,9 @@ export function parseRemoteSpec(spec: string): RemoteSpec | undefined {
     checkRef(ref, spec);
     return { kind: 'git', repo, path, ref };
   }
+  if (scheme === 'cloud') return parseCloudSpec(spec);
   if (scheme === 'http') throw new ImportError(`'${spec}' uses http://; only https:// imports are allowed`);
-  if (scheme !== 'https') throw new ImportError(`'${spec}' is not a supported import source; use a relative path, git: or https://`);
+  if (scheme !== 'https') throw new ImportError(`'${spec}' is not a supported import source; use a relative path, git:, https:// or cloud:`);
   let url: URL;
   try {
     url = new URL(spec);
@@ -118,9 +141,57 @@ export function parseRemoteSpec(spec: string): RemoteSpec | undefined {
   return { kind: 'https', url: url.href };
 }
 
+function parseCloudSpec(spec: string): CloudSpec {
+  const body = spec.slice('cloud:'.length);
+  const split = body.indexOf('//');
+  const head = split === -1 ? body : body.slice(0, split);
+  const parts = head.split(':');
+  if (parts.length > 2) throw new ImportError(`'${spec}' is not a cloud source; write cloud:<name> or cloud:<name>:<tag>`);
+  const name = parts[0].endsWith('.proschi') ? parts[0].slice(0, -'.proschi'.length) : parts[0];
+  if (!name || name.length > MAX_CLOUD_NAME || name.split('/').some((p) => !CLOUD_NAME_SEGMENT.test(p) || p === '.' || p === '..')) {
+    throw new ImportError(
+      `'${spec}' names an invalid diagram '${parts[0]}'; use the diagram's file name (letters, digits, '.', '_', '+', '-' and '/', no spaces), with or without .proschi`,
+    );
+  }
+  const tag = parts.length === 2 ? parts[1] : LATEST_TAG;
+  if (!VERSION_TAG.test(tag)) {
+    throw new ImportError(`'${spec}' has an invalid version tag '${tag}'; use up to 64 letters, digits, '.', '_' and '-', starting with a letter or digit, e.g. 2026-11-01`);
+  }
+  if (split === -1) return { kind: 'cloud', name, tag };
+  return { kind: 'cloud', name, tag, path: repoPathSegments(body.slice(split + 2), spec).join('/') };
+}
+
 /** The canonical spelling of a remote spec, which is also the path the import resolves to. */
 export function formatRemoteSpec(spec: RemoteSpec): string {
+  if (spec.kind === 'cloud') return `cloud:${spec.name}:${spec.tag}${spec.path ? `//${spec.path}` : ''}`;
   return spec.kind === 'git' ? `git:${spec.repo}//${spec.path}@${spec.ref}` : spec.url;
+}
+
+/** The file name a cloud spec's diagram has in the account: the `name` the versions API looks up. */
+export function cloudDocumentName(spec: CloudSpec): string {
+  return `${spec.name}.proschi`;
+}
+
+/**
+ * The saved versions a document reads through `cloud:` imports and `system`
+ * `from` paths, canonical (`cloud:<name>:<tag>`) and sorted, so the editor
+ * can fetch them before parsing. `files` holds what was fetched so far; the
+ * cloud files in it are read too, so call again after adding them until
+ * nothing new comes back.
+ */
+export function cloudSpecsOf(source: string, { path, files = {} }: { path?: string; files?: Record<string, string> } = {}): string[] {
+  const specs = new Set<string>();
+  const known = mapResolver(files);
+  parse(source, {
+    path,
+    resolve: (importPath, fromPath) => {
+      const resolved = joinImportPath(fromPath, importPath);
+      const remote = resolved === undefined ? undefined : parseRemoteSpec(resolved);
+      if (remote?.kind === 'cloud') specs.add(formatRemoteSpec({ kind: 'cloud', name: remote.name, tag: remote.tag }));
+      return known(importPath, fromPath);
+    },
+  });
+  return [...specs].sort();
 }
 
 /**
@@ -137,9 +208,23 @@ export function formatRemoteSpec(spec: RemoteSpec): string {
 export function resolveImportPath(fromPath: string | undefined, importPath: string): string {
   if (importPath.includes('\0')) throw new ImportError(`'${importPath.replace(/\0/g, '')}' contains a NUL character`);
   const remote = parseRemoteSpec(importPath);
+  if (remote?.kind === 'cloud' && fromPath && isRemoteSpec(fromPath) && parseRemoteSpec(fromPath)?.kind !== 'cloud') {
+    // A shared git or https file names no account: whose diagram would it be?
+    throw new ImportError(`'${importPath}' is a cloud import inside ${fromPath}; cloud: sources only work from your own diagrams`);
+  }
   if (remote) return formatRemoteSpec(remote);
   if (isAbsolutePath(importPath)) throw new ImportError(`'${importPath}' is an absolute path; imports must be relative to the importing file`);
   const from = fromPath && isRemoteSpec(fromPath) ? parseRemoteSpec(fromPath) : undefined;
+  if (from?.kind === 'cloud') {
+    const parts = (from.path ?? '').split('/').slice(0, -1);
+    for (const part of importPath.split('/')) {
+      if (part === '' || part === '.') continue;
+      if (part !== '..') parts.push(part);
+      else if (parts.length > 0) parts.pop();
+      else throw new ImportError(`'${importPath}' leaves the files saved with cloud:${from.name}:${from.tag}`);
+    }
+    return formatRemoteSpec({ ...from, path: repoPathSegments(parts.join('/'), importPath).join('/') });
+  }
   if (from?.kind === 'git') {
     const parts = from.path.split('/').slice(0, -1);
     for (const part of importPath.split('/')) {

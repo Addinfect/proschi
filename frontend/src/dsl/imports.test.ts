@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { joinImportPath, mapResolver, parse } from './index';
-import { ImportError, isImportKey, parseRemoteSpec, resolveImportPath } from './imports';
+import { ImportError, cloudDocumentName, cloudSpecsOf, isImportKey, parseRemoteSpec, resolveImportPath } from './imports';
 import { format } from './format';
 
 const infra = `title "Infra"
@@ -252,5 +252,81 @@ describe('import paths and remote sources', () => {
     const missing = parse('import "git:github.com/other/repo//base.proschi@v1"', { path: 'root.proschi', resolve: mapResolver(files) });
     expect(missing.diagnostics).toHaveLength(1);
     expect(missing.diagnostics[0].severity).toBe('error');
+  });
+});
+
+describe('cloud sources', () => {
+  const reason = (from: string | undefined, path: string) => {
+    try {
+      resolveImportPath(from, path);
+    } catch (e) {
+      expect((e as Error).name).toBe('ImportError');
+      return (e as Error).message;
+    }
+    return undefined;
+  };
+
+  it('parses cloud:<name>[:<tag>], latest by default', () => {
+    expect(parseRemoteSpec('cloud:orders')).toEqual({ kind: 'cloud', name: 'orders', tag: 'latest' });
+    expect(parseRemoteSpec('cloud:teams/orders.proschi:2026-11-01')).toEqual({ kind: 'cloud', name: 'teams/orders', tag: '2026-11-01' });
+    expect(parseRemoteSpec('CLOUD:orders:v2')).toEqual({ kind: 'cloud', name: 'orders', tag: 'v2' });
+    expect(parseRemoteSpec('cloud:orders:v1//teams/db.proschi')).toEqual({ kind: 'cloud', name: 'orders', tag: 'v1', path: 'teams/db.proschi' });
+    expect(cloudDocumentName({ kind: 'cloud', name: 'teams/orders', tag: 'latest' })).toBe('teams/orders.proschi');
+  });
+
+  it('has one canonical spelling, so cloud:x and cloud:x:latest are the same file', () => {
+    expect(resolveImportPath('root.proschi', 'cloud:orders')).toBe('cloud:orders:latest');
+    expect(resolveImportPath('root.proschi', 'cloud:orders.proschi:latest')).toBe('cloud:orders:latest');
+    expect(resolveImportPath(undefined, 'cloud:orders:2026-11-01')).toBe('cloud:orders:2026-11-01');
+    expect(isImportKey('cloud:orders:latest')).toBe(true);
+    expect(isImportKey('cloud:orders')).toBe(false);
+    const files = { 'cloud:orders:latest': 'api [REST API]', 'orders.proschi': 'draft [Redis]' };
+    for (const spec of ['cloud:orders', 'cloud:orders:latest']) {
+      const { diagram, diagnostics } = parse(`import "${spec}"`, { path: 'root.proschi', resolve: mapResolver(files) });
+      expect(diagnostics).toEqual([]);
+      expect(diagram.nodes.map((n) => n.id)).toEqual(['api']);
+    }
+    // A version that was not fetched never falls back to the draft of the same name.
+    const missing = parse('import "cloud:orders:v9"', { path: 'root.proschi', resolve: mapResolver(files) });
+    expect(missing.diagnostics.map((d) => d.severity)).toEqual(['error']);
+  });
+
+  it('refuses bad names and tags with a reason', () => {
+    expect(reason(undefined, 'cloud:')).toMatch(/invalid diagram ''/);
+    expect(reason(undefined, 'cloud::v1')).toMatch(/invalid diagram/);
+    expect(reason(undefined, 'cloud:my orders')).toMatch(/whitespace/);
+    expect(reason(undefined, 'cloud:../secrets')).toMatch(/invalid diagram/);
+    expect(reason(undefined, 'cloud:a//../b.proschi')).toMatch(/without '..'/);
+    expect(reason(undefined, 'cloud:-rf')).toMatch(/invalid diagram/);
+    expect(reason(undefined, 'cloud:orders:a:b')).toMatch(/write cloud:<name> or cloud:<name>:<tag>/);
+    expect(reason(undefined, 'cloud:orders:')).toMatch(/invalid version tag ''/);
+    expect(reason(undefined, 'cloud:orders:-x')).toMatch(/invalid version tag/);
+    expect(reason(undefined, 'cloud:orders:a/b')).toMatch(/invalid version tag/);
+    expect(reason(undefined, `cloud:orders:${'x'.repeat(65)}`)).toMatch(/invalid version tag/);
+    expect(resolveImportPath(undefined, `cloud:orders:${'x'.repeat(64)}`)).toMatch(/^cloud:orders:x+$/);
+  });
+
+  it('resolves relative imports within the files saved with the version', () => {
+    expect(resolveImportPath('cloud:orders:v1', 'db.proschi')).toBe('cloud:orders:v1//db.proschi');
+    expect(resolveImportPath('cloud:orders:v1//teams/a.proschi', '../b.proschi')).toBe('cloud:orders:v1//b.proschi');
+    expect(resolveImportPath('cloud:orders:v1', 'git:github.com/acme/infra//a.proschi@v1')).toBe('git:github.com/acme/infra//a.proschi@v1');
+    expect(resolveImportPath('cloud:orders:v1', 'cloud:billing')).toBe('cloud:billing:latest');
+    expect(reason('cloud:orders:v1', '../escape.proschi')).toMatch(/leaves the files saved with cloud:orders:v1/);
+  });
+
+  it('is refused inside git and https files, which belong to no account', () => {
+    expect(reason('git:github.com/acme/infra//a.proschi@v1', 'cloud:orders')).toMatch(/only work from your own diagrams/);
+    expect(reason('https://example.com/a.proschi', 'cloud:orders:v1')).toMatch(/only work from your own diagrams/);
+  });
+
+  it('lists the versions a document needs, through imports, systems and fetched files', () => {
+    const root = 'import "cloud:shared"\nimport "local.proschi"\nsystem orders {\n  from "cloud:orders:2026-11-01"\n  expose api\n}\n';
+    const files = { 'local.proschi': 'import "cloud:billing:v1"\nx [Redis]' };
+    expect(cloudSpecsOf(root, { path: 'root.proschi', files })).toEqual(['cloud:billing:v1', 'cloud:orders:2026-11-01', 'cloud:shared:latest']);
+    // Once a version is fetched, what it reads (its own files and other versions) is listed too.
+    const fetched = { ...files, 'cloud:shared:latest': 'import "db.proschi"\nimport "cloud:base:v3"' };
+    expect(cloudSpecsOf(root, { path: 'root.proschi', files: fetched })).toEqual(['cloud:base:v3', 'cloud:billing:v1', 'cloud:orders:2026-11-01', 'cloud:shared:latest']);
+    expect(cloudSpecsOf('a -> b')).toEqual([]);
+    expect(cloudSpecsOf('import "cloud:bad name"')).toEqual([]);
   });
 });

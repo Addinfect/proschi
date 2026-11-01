@@ -41,6 +41,8 @@ import {
   Cloud,
   CloudOff,
   Import,
+  RefreshCw,
+  History,
 } from 'lucide-react';
 import { examples, parse, type Diagnostic, type DiagramScenario, type DiagramUseCase, type SourceLoc } from '../../dsl';
 import { toFlowEdges } from '../../dsl/layout';
@@ -56,6 +58,7 @@ import {
   addDoc,
   addFile,
   addFiles,
+  cloudImports,
   currentDoc,
   fileNameOf,
   initialState,
@@ -108,6 +111,10 @@ import { ZenButton, ZenCollapse, ZenStatus } from './Zen';
 import EditorZone from './EditorZone';
 import CloudSection, { CloudIcon } from './CloudStatus';
 import { useCloudSync } from './useCloudSync';
+import { useCloudFiles } from './useCloudFiles';
+import { withCloudErrors } from '../../playground/cloudRefs';
+import type { VersionInfo } from '../../playground/versions';
+import type { VersionMode } from './VersionViewer';
 import { eyebrow, field, iconButton, outlineButton, primaryButton, subBar, toolButton } from './ui';
 import Tabs from '../../design/Tabs';
 import HelpMenu from '../../onboarding/HelpMenu';
@@ -125,6 +132,8 @@ const ReviewPanel = lazy(() => import('../../review/ReviewPanel'));
 const ExamplesGallery = lazy(() => import('./ExamplesGallery'));
 const ShortLinksDialog = lazy(() => import('./ShortLinksDialog'));
 const ImportDialog = lazy(() => import('./ImportDialog'));
+const VersionsDialog = lazy(() => import('./VersionsDialog'));
+const VersionViewer = lazy(() => import('./VersionViewer'));
 // First-run help costs nothing until it is shown.
 const EditorTour = lazy(() => import('../../onboarding/EditorTour'));
 const TourHint = lazy(() => import('../../onboarding/TourHint'));
@@ -192,6 +201,12 @@ export default function Playground() {
   const docState = useSyncExternalStore(docStore.subscribe, docStore.get);
   const setDocState = docStore.set;
   const current = currentDoc(docState);
+  /**
+   * The `cloud:` files a share link bundled, for the diagram it opened. They are never
+   * saved with it (storedImports): only used, while open, where a version cannot be fetched.
+   */
+  const [linkCloud, setLinkCloud] = useState(() => ({ docId: docStore.get().currentId, files: cloudImports(decodeShareLink(window.location.hash)?.imports) }));
+  const linkCloudFiles = linkCloud.docId === current.id ? linkCloud.files : {};
   const source = current.source;
   const rootPath = fileNameOf(current);
   const setSource = useCallback((next: string) => setDocState((s) => updateCurrent(s, next)), [setDocState]);
@@ -212,6 +227,8 @@ export default function Playground() {
   // A link may point at a use case step; open straight into playback there.
   const [linkPlayback] = useState(() => decodeShareLink(window.location.hash)?.playback);
   const [parsedSource, setParsedSource] = useState(source);
+  /** Short links and cloud sources, signed in on a build with accounts; `off` elsewhere. */
+  const account = useAccount(noop);
   const [selectedUseCaseId, setSelectedUseCaseId] = useState<string | undefined>(linkPlayback?.useCase);
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | undefined>(linkPlayback?.scenario);
   const [playing, setPlaying] = useState(!!linkPlayback);
@@ -219,12 +236,13 @@ export default function Playground() {
   const [playStep, setPlayStep] = useState(0);
   const [showExamples, setShowExamples] = useState(false);
   const [showShortLinks, setShowShortLinks] = useState(false);
-  /** Short links, signed in on a build with accounts; `off` elsewhere. */
-  const account = useAccount(noop);
   /** The short link made for a document and its imports, so asking again reuses it. */
   const shortLinkRef = useRef<{ key: string; id: string; url: string } | null>(null);
   const [shortening, setShortening] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showVersions, setShowVersions] = useState(false);
+  /** A saved version open read-only, or two compared, over the editor. */
+  const [versionView, setVersionView] = useState<{ mode: VersionMode; versions: VersionInfo[] } | null>(null);
   /** The code and diagram panes' sizes, as last set with the splitter. */
   const [splitLayout] = useState(() => loadJson<Layout | undefined>(SPLIT_KEY, undefined));
   /** Bumped when the splitter is let go, so the diagram re-fits its new width. */
@@ -258,10 +276,18 @@ export default function Playground() {
 
   // Imports resolve against the other diagrams saved in this browser. Comparing them
   // by value keeps typing in the current diagram from re-parsing before the debounce.
-  const importableKey = JSON.stringify(importableFiles(docState.docs, current));
+  // `cloud:` sources are versions in the signed-in account, fetched before the parse (V6).
+  const accountStatus = account.state.status;
+  const cloudRefs = useCloudFiles(parsedSource, rootPath, { ...current.imports, ...linkCloudFiles }, accountStatus === 'loading' ? null : accountStatus === 'signed-in');
+  const importableKey = JSON.stringify({ ...importableFiles(docState.docs, current), ...linkCloudFiles, ...cloudRefs.files });
+  const cloudErrorsKey = JSON.stringify(cloudRefs.errors);
   const parsed = useMemo(
-    () => parse(parsedSource, { path: rootPath, resolve: filesResolver(JSON.parse(importableKey), rootPath) }),
-    [parsedSource, rootPath, importableKey],
+    () =>
+      parse(parsedSource, {
+        path: rootPath,
+        resolve: withCloudErrors(filesResolver(JSON.parse(importableKey), rootPath), JSON.parse(cloudErrorsKey), cloudRefs.loading),
+      }),
+    [parsedSource, rootPath, importableKey, cloudErrorsKey, cloudRefs.loading],
   );
   const { diagram, diagnostics } = parsed;
   const simulation = useSimulation(diagram);
@@ -269,7 +295,7 @@ export default function Playground() {
   const systems = useSystemView(current.id, diagram, simulation.analysis, simulation.results);
   const { shown } = systems;
   /** Navigated into a system: its team file, which the code pane shows instead of the document. */
-  const team = useMemo(() => (systems.focusFile ? teamFileOf(docState.docs, current, systems.focusFile) : undefined), [systems.focusFile, docState.docs, current]);
+  const team = useMemo(() => (systems.focusFile ? teamFileOf(docState.docs, current, systems.focusFile, cloudRefs.files) : undefined), [systems.focusFile, docState.docs, current, cloudRefs.files]);
   const teamDiagnostics = useMemo(() => (team ? diagnostics.filter((d) => d.file === team.path) : []), [team, diagnostics]);
   const editTeam = (next: string) => {
     if (team?.docId) setDocState((s) => updateDoc(s, team.docId!, next));
@@ -328,6 +354,7 @@ export default function Playground() {
       (share) => {
         if (cancelled) return;
         openDoc((s) => openShared(s, share.source, share.imports));
+        setLinkCloud({ docId: docStore.get().currentId, files: cloudImports(share.imports) });
         dropParam(encodeShareHash(share.source, undefined, share.imports));
       },
       (error: unknown) => {
@@ -641,6 +668,45 @@ export default function Playground() {
     setMobilePane('diagram');
   };
 
+  /** Why this diagram has no versions (they live in the account), with what to do; null when it can have them. */
+  const versionsHint = ((): { message: string; actions: { label: string; run: () => void }[] } | null => {
+    const state = cloud.state;
+    if (state.kind === 'unavailable') return { message: 'Versions are saved in a Proschi account, which this copy of the editor does not have.', actions: [] };
+    if (state.kind === 'signed-out') {
+      return {
+        message: 'Versions live in your Proschi account. Sign in, and this diagram syncs there; then you can save versions of it and use them in other diagrams.',
+        actions: state.providers.map((p) => ({ label: `Sign in with ${p === 'github' ? 'GitHub' : 'Google'}`, run: () => cloud.signIn(p) })),
+      };
+    }
+    if (state.kind === 'off' || !cloud.enabled) return { message: 'Versions live in your account, and cloud sync is off in this browser.', actions: [{ label: 'Turn on cloud sync', run: () => cloud.setEnabled(true) }] };
+    if (cloud.local.has(current.id)) {
+      return {
+        message: 'This diagram stays in this browser only, so it has no versions. Keep it in your account to save versions of it.',
+        actions: cloud.canKeep ? [{ label: 'Keep in cloud', run: () => cloud.keepInCloud(current.id) }] : [],
+      };
+    }
+    if (state.kind === 'loading') return { message: 'Connecting to your account…', actions: [] };
+    if (state.kind === 'offline') return { message: 'Offline: versions are in your account, so they need a connection.', actions: [] };
+    return null;
+  })();
+  const versionDraft = useMemo(() => ({ source, files: JSON.parse(importableKey) as Record<string, string> }), [source, importableKey]);
+  /** "Restore into draft": the version's text replaces the draft's; the version stays as it is, and Undo puts the draft back. */
+  const restoreVersion = (text: string, tag: string) => {
+    const before = source;
+    setSource(text);
+    setVersionView(null);
+    setBanner({
+      message: `Restored version ${tag} into the draft. The version itself is unchanged.`,
+      action: {
+        label: 'Undo',
+        run: () => {
+          setSource(before);
+          setBanner(null);
+        },
+      },
+    });
+  };
+
   const canPlay = !!scenario && scenario.steps.length > 0;
   const problemCount = diagnostics.length;
   const sortedDocs = [...docState.docs].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -780,6 +846,26 @@ export default function Playground() {
                   }}
                 >
                   Format code <span className="ml-auto text-xs text-muted">Shift+Alt+F</span>
+                </MenuItem>
+                {cloudRefs.any && (
+                  <MenuItem
+                    icon={<RefreshCw size={14} />}
+                    onSelect={() => {
+                      cloudRefs.refresh();
+                      close();
+                    }}
+                  >
+                    Refresh cloud references
+                  </MenuItem>
+                )}
+                <MenuItem
+                  icon={<History size={14} />}
+                  onSelect={() => {
+                    setShowVersions(true);
+                    close();
+                  }}
+                >
+                  Versions…
                 </MenuItem>
                 <div className="my-1 border-t border-ink/10" />
                 <MenuItem
@@ -1160,6 +1246,47 @@ export default function Playground() {
             onDeleted={(id) => {
               if (shortLinkRef.current?.id === id) shortLinkRef.current = null;
             }}
+          />
+        </Suspense>
+      )}
+
+      {showVersions && (
+        <Suspense fallback={<PaneLoading overlay />}>
+          <VersionsDialog
+            docId={current.id}
+            fileName={rootPath}
+            hint={versionsHint}
+            pushedVersion={cloud.pushedVersion}
+            pull={cloud.pull}
+            onView={(tag, listing) => {
+              setShowVersions(false);
+              setVersionView({ mode: { kind: 'view', tag }, versions: listing.versions });
+            }}
+            onCompare={(tag, listing) => {
+              setShowVersions(false);
+              setVersionView({ mode: { kind: 'compare', base: tag, target: '' }, versions: listing.versions });
+            }}
+            onCopy={(text, message) => {
+              void copyText(text, 'Copy this:');
+              setBanner({ message });
+            }}
+            onClose={() => setShowVersions(false)}
+          />
+        </Suspense>
+      )}
+
+      {versionView && (
+        <Suspense fallback={<PaneLoading overlay />}>
+          <VersionViewer
+            docId={current.id}
+            fileName={rootPath}
+            versions={versionView.versions}
+            mode={versionView.mode}
+            onMode={(mode) => setVersionView((v) => (v ? { ...v, mode } : v))}
+            draft={versionDraft}
+            cloudFiles={cloudRefs.files}
+            onClose={() => setVersionView(null)}
+            onRestore={restoreVersion}
           />
         </Suspense>
       )}

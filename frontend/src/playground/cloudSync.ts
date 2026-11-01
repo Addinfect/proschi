@@ -1,5 +1,5 @@
 import type { DocStore } from './docStore';
-import { BLANK_SOURCE, defaultClock, defaultIds } from './documents';
+import { BLANK_SOURCE, defaultClock, defaultIds, type DocumentState } from './documents';
 import {
   afterDelete,
   afterPut,
@@ -72,7 +72,12 @@ export interface Transport {
 
 export interface SyncStorage {
   load(): unknown;
-  save(value: StoredSync): void;
+  /**
+   * Saves the sync state with the diagrams it describes, the diagrams first: a
+   * state naming a pulled diagram this browser never saved would read, on the
+   * next load, as that diagram deleted here, and delete it from the account.
+   */
+  save(value: StoredSync, docs: DocumentState): void;
 }
 
 export interface Timers {
@@ -231,6 +236,22 @@ export class DocSync {
     return this.run({ pull: false, keepalive });
   }
 
+  /**
+   * The account's version of diagram `id` once its edits here are pushed,
+   * e.g. to tag a version of exactly what is on screen; null when it is not
+   * in the account (or does not get there in a few seconds).
+   */
+  async pushedVersion(id: string, tries = 20): Promise<number | null> {
+    for (let i = 0; i < tries; i++) {
+      await this.flush();
+      const pending = pendingOps(this.o.store.get(), this.meta).some((op) => op.id === id);
+      if (!this.running && !pending) return Object.hasOwn(this.meta.docs, id) && this.meta.docs[id].fp !== '' ? this.meta.docs[id].version : null;
+      if (this.off || this.stopped) return null;
+      await new Promise((resolve) => this.o.timers.set(() => resolve(undefined), 250));
+    }
+    return null;
+  }
+
   /** Turns cloud sync on or off in this browser. Off keeps everything in this browser and leaves the account's copies alone. */
   setEnabled(on: boolean): void {
     this.off = !on;
@@ -280,7 +301,7 @@ export class DocSync {
   }
 
   private persist(): void {
-    this.o.storage.save({ ...(this.off ? { off: true } : {}), meta: this.meta });
+    this.o.storage.save({ ...(this.off ? { off: true } : {}), meta: this.meta }, this.o.store.get());
   }
 
   private async run({ pull, keepalive = false }: { pull: boolean; keepalive?: boolean }): Promise<void> {

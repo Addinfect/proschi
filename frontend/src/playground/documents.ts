@@ -14,8 +14,29 @@ export interface SavedDiagram {
   /**
    * Imported files (path → source) that came with a share link. They win over
    * saved diagrams of the same name, so the link renders as it was shared.
+   * Never `cloud:` files (storedImports): those are fetched again each time.
    */
   imports?: Record<string, string>;
+}
+
+/** Whether an imports key is a `cloud:` version or a file saved with one (`cloud:<name>:<tag>//<path>`). */
+const isCloudKey = (path: string): boolean => /^cloud:/i.test(path);
+
+/**
+ * The imports a diagram keeps (in this browser, the account and its saved
+ * versions): all but `cloud:` files, which are fetched from the account each
+ * time, so a share link's copies never get saved, synced or frozen into a
+ * version. Undefined when nothing is left.
+ */
+export function storedImports(imports: Record<string, string> | undefined): Record<string, string> | undefined {
+  if (!imports) return undefined;
+  const kept = Object.fromEntries(Object.entries(imports).filter(([path]) => !isCloudKey(path)));
+  return Object.keys(kept).length ? kept : undefined;
+}
+
+/** The `cloud:` files of a share link's imports, used only while it is open where a version cannot be fetched. */
+export function cloudImports(imports: Record<string, string> | undefined): Record<string, string> {
+  return Object.fromEntries(Object.entries(imports ?? {}).filter(([path]) => isCloudKey(path)));
 }
 
 export interface DocumentState {
@@ -38,7 +59,7 @@ export function readDiagram(value: unknown): SavedDiagram | null {
   if (!isRecord(value) || typeof value.id !== 'string' || !value.id || typeof value.source !== 'string') return null;
   const updatedAt = typeof value.updatedAt === 'string' ? value.updatedAt : new Date(0).toISOString();
   const fileName = typeof value.fileName === 'string' && value.fileName.trim() && value.fileName.length <= MAX_PATH_LENGTH ? value.fileName : undefined;
-  const imports = fileMap(value.imports);
+  const imports = storedImports(fileMap(value.imports));
   return { id: value.id, source: value.source, updatedAt, ...(fileName ? { fileName } : {}), ...(imports ? { imports } : {}) };
 }
 
@@ -95,7 +116,8 @@ export function initialState(input: InitialInput, now: Clock = defaultClock, new
   }
 
   if (input.sharedSource !== null) {
-    const imports = input.sharedImports && Object.keys(input.sharedImports).length ? { imports: input.sharedImports } : {};
+    const kept = storedImports(input.sharedImports);
+    const imports = kept ? { imports: kept } : {};
     const existing = docs.find((d) => d.source === input.sharedSource);
     if (existing) {
       currentId = existing.id;

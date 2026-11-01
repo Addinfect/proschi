@@ -101,7 +101,7 @@ export function readPosts(blogDir: string): Post[] {
     if (slugs.has(p.slug) || p.slug === 'rss') throw new Error(`blog/${p.file}: the slug "${p.slug}" is taken`)
     slugs.add(p.slug)
   }
-  return posts.sort((a, b) => b.date.localeCompare(a.date) || a.slug.localeCompare(b.slug))
+  return posts.sort((a, b) => b.date.localeCompare(a.date) || (b.version ?? '').localeCompare(a.version ?? '', 'en', { numeric: true }) || a.slug.localeCompare(b.slug))
 }
 
 /** Renders a post's Markdown; its images must sit in blog/ (`blogDir`). */

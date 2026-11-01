@@ -62,6 +62,12 @@
       "description": "Draw each team's design as one box, connect the teams, and let the simulation say which team cannot take the traffic you send to it."
     },
     {
+      "slug": "versions",
+      "title": "Diagram versions: save and compare",
+      "source": "VERSIONS.md",
+      "description": "Save versions of a Proschi diagram in your account, compare any two with the simulation side by side, restore one, or use it in another diagram."
+    },
+    {
       "slug": "hld",
       "title": "High-level design: traffic and capacity",
       "source": "HLD.md",
@@ -187,6 +193,7 @@
         { "page": "scenarios", "label": "Scenarios" },
         { "page": "imports", "label": "Imports" },
         { "page": "systems", "label": "Org diagrams" },
+        { "page": "versions", "label": "Versions" },
         { "page": "hld", "label": "High-level design" },
         { "page": "tests", "label": "Requirements and tests" },
         { "page": "grammar", "label": "Grammar" }

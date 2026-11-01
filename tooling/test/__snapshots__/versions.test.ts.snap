@@ -1,0 +1,27 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`proschi versions > diffs a tag against latest 1`] = `
+"cloud:orders:v1 (#1) → cloud:orders:2026-11-01 (#2, latest)
+
+Diagram
+  ~ title: "Orders" → "Orders v2"
+Nodes
+  + cache
+  - legacy
+  ~ api
+      techStack: "REST API" → "GraphQL"
+      replicas: (none) → 3
+Edges
+  + api -> cache
+  - api -> legacy
+Use cases
+  ~ checkout
+      steps:
+        + api -> cache : reserve stock
+Scenarios
+  ~ checkout/main
+      steps:
+        + api -> cache : reserve stock
+
+2 added, 2 removed, 4 changed"
+`;

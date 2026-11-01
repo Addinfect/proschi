@@ -3,7 +3,7 @@ import { api, ApiError, apiEnabled, loginUrl, type ProviderId } from '../../serv
 import { loadJson, saveJson } from '../../services/storage';
 import type { DocStore } from '../../playground/docStore';
 import type { DocSync, SyncStatus } from '../../playground/cloudSync';
-import { SYNC_KEY } from '../../playground/documents';
+import { DOCS_KEY, SYNC_KEY } from '../../playground/documents';
 
 export type CloudState =
   /** A build without accounts: the editor saves in this browser only. */
@@ -35,6 +35,10 @@ export interface CloudSync {
   moveToBrowser: (id: string) => void;
   /** "Keep in cloud": syncs the diagram again, when a slot is free. */
   keepInCloud: (id: string) => void;
+  /** The account's version of a diagram once its edits are pushed (DocSync.pushedVersion); null when it is not in the account. */
+  pushedVersion: (id: string) => Promise<number | null>;
+  /** Pulls the account's changes now. */
+  pull: () => Promise<void>;
 }
 
 const NONE: ReadonlySet<string> = new Set();
@@ -86,7 +90,13 @@ export function useCloudSync(store: DocStore, onConflict: (titles: string[]) => 
         store,
         transport: fetchTransport,
         userId,
-        storage: { load: () => loadJson<unknown>(SYNC_KEY, null), save: (value) => saveJson(SYNC_KEY, value) },
+        storage: {
+          load: () => loadJson<unknown>(SYNC_KEY, null),
+          save: (value, docs) => {
+            saveJson(DOCS_KEY, docs);
+            saveJson(SYNC_KEY, value);
+          },
+        },
         onConflict: (titles) => onConflictRef.current(titles),
         onSignedOut: () => void signedOut(),
       });
@@ -179,7 +189,12 @@ export function useCloudSync(store: DocStore, onConflict: (titles: string[]) => 
   const moveToBrowser = useCallback((id: string) => syncRef.current?.moveToBrowser(id), []);
   const keepInCloud = useCallback((id: string) => syncRef.current?.keepInCloud(id), []);
 
-  return { state, enabled, signIn, setEnabled, deleteCloudCopies, ask, held, answer, signOut, ...placement, moveToBrowser, keepInCloud };
+  const pushedVersion = useCallback(async (id: string) => (syncRef.current ? syncRef.current.pushedVersion(id) : null), []);
+  const pull = useCallback(async () => {
+    await syncRef.current?.sync();
+  }, []);
+
+  return { state, enabled, signIn, setEnabled, deleteCloudCopies, ask, held, answer, signOut, ...placement, moveToBrowser, keepInCloud, pushedVersion, pull };
 }
 
 /** The sync status in words, for the Diagrams menu. */

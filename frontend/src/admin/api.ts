@@ -125,6 +125,8 @@ export interface UserDetail {
     lastSeenDay: string | null;
     blockedAt: number | null;
     blockedReason: string | null;
+    /** `users.plan`, e.g. free. */
+    plan: string;
   };
   identities: { provider: string; subject: string }[];
   sessions: { kind: string; count: number; lastCreatedAt: number }[];

@@ -12,7 +12,8 @@ One Cloudflare Worker serves <https://proschi.app/>:
 Site and API share one origin, so there is no CORS. The session is an
 HttpOnly, `SameSite=Lax`, `__Host-` cookie that page scripts cannot read.
 Native apps sign in through the system browser and send bearer tokens
-instead ([Mobile apps](#mobile-apps)).
+instead ([Mobile apps](#mobile-apps)), and so does the `proschi` CLI
+([Command line sign-in](#command-line-sign-in)).
 
 ## What the API does
 
@@ -91,9 +92,9 @@ instead ([Mobile apps](#mobile-apps)).
   was based on; a stale one gets 409 with the server's copy, and the page
   keeps both (its own renamed "<name> (conflict <date>)"). Deleting leaves a
   tombstone, so other devices delete their copy too; the daily cron prunes
-  tombstones after 30 days. 64 KiB each, and at most 5 diagrams a user for
-  now: `documentLimit(ctx, user)` returns `FREE_DOCUMENT_LIMIT`, the one
-  place a paid plan will raise it. A new diagram past the limit gets 409
+  tombstones after 30 days. 64 KiB each, and at most 5 diagrams a user on
+  the free plan ([Plans and limits](#plans-and-limits)). A new diagram past
+  the limit gets 409
   `{error: 'document_limit', limit, used}`; saving one the account keeps is
   always allowed. The page decides which diagrams sync (`cloudPlan` in
   `sync.ts`): those in the account keep their slot, new ones take free
@@ -103,6 +104,11 @@ instead ([Mobile apps](#mobile-apps)).
   uploads another account's diagrams: on an account switch it drops them
   from the browser and asks before adding any others (at most as many as
   fit).
+- **Diagram versions** ([below](#diagram-versions), `src/versions.ts`):
+  immutable, tagged snapshots of a synced diagram, which cloud references
+  resolve to, in the signed-in account only.
+- **Plans and limits** ([below](#plans-and-limits), `src/plans.ts`): what an
+  account may keep. Everyone is on the free plan; there are no payments.
 - **Short links and embeds** ([below](#short-links-and-embeds)): a
   signed-in user stores a diagram at `/s/<id>` with a preview image; anyone
   with the link opens it in the editor or the embed page.
@@ -126,14 +132,15 @@ instead ([Mobile apps](#mobile-apps)).
 | `GET /auth/<provider>/start?return=<path>` | Redirects to the provider; `return` must be a path on this site. `&link=1`, signed in: adds the provider to the account |
 | `GET /auth/<provider>/callback` | Sets the session cookie (30 days) and redirects to the path; on failure adds `?login_error=cancelled\|failed`. Linking keeps the session and adds `?linked=<provider>` or `?login_error=identity_in_use\|provider_linked` |
 | `GET /auth/<provider>/start?client=app&redirect_uri=<uri>&code_challenge=<S256>&code_challenge_method=S256[&state=]` | A native app's sign-in: the callback sets no cookie and redirects to `redirect_uri?code=<one-time code>[&state=]` (or `?error=access_denied\|server_error`). `redirect_uri` must be listed in `APP_REDIRECT_URIS` ([Mobile apps](#mobile-apps)) |
+| `GET /auth/<provider>/start?client=proschi-cli&redirect_uri=http://127.0.0.1:<port>/callback&…` | The same for the `proschi` CLI, with a loopback `redirect_uri` on any port instead of the allow-list ([Command line sign-in](#command-line-sign-in)) |
 | `POST /auth/token {grant_type, …}` | `authorization_code` with `code` and `code_verifier`, or `refresh_token` with `refresh_token`: `{access_token, token_type: "Bearer", expires_in, refresh_token}` |
 | `POST /auth/revoke {token}` | Ends the app sign-in an access or refresh token belongs to; 200 whether or not the token was known |
 | `POST /auth/logout` | Ends the session |
 | `GET /api/health` | `{ok, env, simVersion}` once D1 answers; 503 otherwise |
 | `GET /api/me` | `{user: {id, displayName, publicProfile, dailyGoal, providers}, progress: {<problem id>: {status, runs, source, solvedAt, solvedDay, runsToSolve, bestCostUsd, bestP99Ms}}}` |
 | `PATCH /api/me {displayName?, publicProfile?, dailyGoal?}` | `publicProfile: true` shows the user on the leaderboards, with a public profile; `dailyGoal` is cards a day, 5, 10 (the default), 20 or 30 |
-| `DELETE /api/me` | Deletes the account, its sessions and app tokens, its progress, its card reviews, its daily challenge attempts, its achievements, its game progress and runs, its short links, its synced diagrams and its email reminders' address |
-| `GET /api/me/export` | Everything stored about the user, as `proschi-data.json`; `sessions` lists each with its `kind` (`web`, `app_access` or `app_refresh`), never the token hashes; `challengeAttempts` the daily challenge attempts; `game` the game progress and runs; `shares` the short links, with their diagrams and each preview's `imageUrl`; `documents` the synced diagrams, tombstones included; `emailReminders` the reminders' address and settings (null without one; the unsubscribe secret left out) |
+| `DELETE /api/me` | Deletes the account, its sessions and app tokens, its progress, its card reviews, its daily challenge attempts, its achievements, its game progress and runs, its short links, its synced diagrams and their versions and its email reminders' address |
+| `GET /api/me/export` | Everything stored about the user, as `proschi-data.json`; `sessions` lists each with its `kind` (`web`, `app_access` or `app_refresh`), never the token hashes; `challengeAttempts` the daily challenge attempts; `game` the game progress and runs; `shares` the short links, with their diagrams and each preview's `imageUrl`; `documents` the synced diagrams, tombstones included; `documentVersions` their versions with content (deleted ones with `deletedAt` and the content cleared); `user.plan` the plan; `emailReminders` the reminders' address and settings (null without one; the unsubscribe secret left out) |
 | `GET /api/me/activity?day=YYYY-MM-DD` | With `day` the client's local date: `{day, goal: {reviews, solves}, days: [{day, reviews, newCards, solves, challenges?, runs?}], streak: {current, longest, freezes, frozen, todayDone, today, todayProgress}, recap: {start, end, reviews, newCards, solves, challenges, runs, goalDays, streak}}`. A day with a daily challenge sent (`challenges`) or a game run submitted (`runs`, never imported ones) meets the goal whatever the cards. `days` covers the last 400 days (days without activity left out), `streak` is as of `day` and `recap` is the Monday–Sunday week before `day`'s |
 | `POST /api/me/import {items: [{problemId, source, solved}]}` | The browser's progress on first sign-in, as imported runs; unknown problems are skipped |
 | `GET /api/me/achievements?day=YYYY-MM-DD` | `day` (optional) is the client's local date, for the longest streak as `GET /api/me/activity` counts it. `{achievements: [{id, title, description, icon, tier?, rule, current, target, earned, earnedAt?, unseen}], skills: {readiness, topics: [{topic, mastery}], weakest: [<topic id>]}, stats: {reviews, mastered, longestStreak, estimateStreak, solved}}`: every badge with its progress, mastery and readiness from 0 to 1; stores the badges earned for the first time |
@@ -141,7 +148,13 @@ instead ([Mobile apps](#mobile-apps)).
 | `GET /api/me/documents?since=<ms>` | The synced diagrams changed at or after `since` (Unix milliseconds; all without), tombstones included: `{documents: [{id, name, source, imports, version, updatedAt, deletedAt}], cursor, limit, used}`. `cursor` is the server's time before the query, the next `since`; `limit` is how many diagrams the account may keep (5 for now) and `used` how many it keeps |
 | `PUT /api/me/documents/<id> {name, source, imports?, baseVersion}` | Saves a diagram (`id` is the page's, unique per user). `baseVersion` is the version the page last had, 0 for a new one: `{document}`, its version one higher. 409 `{error, document}` with the server's copy when it changed since (or was deleted: saving on top of the tombstone's version restores it). 413 past 64 KiB (source plus imports). 409 `{error: 'document_limit', message, limit, used}` for a new diagram (or restoring a deleted one) when the account already keeps `limit` |
 | `DELETE /api/me/documents/<id>?baseVersion=<n>` | Leaves a tombstone (name, source and imports cleared): `{document}`. 409 `{error, document}` when it changed since `baseVersion`; 204 for one the account does not have |
-| `DELETE /api/me/documents` | "Delete my cloud copies": every synced diagram and tombstone of the user, at once: `{deleted}` |
+| `DELETE /api/me/documents` | "Delete my cloud copies": every synced diagram and tombstone of the user, at once, their versions with them: `{deleted}` |
+| `POST /api/me/documents/<id>/versions {tag, note?, documentVersion}` | Tags an immutable version of the stored diagram ([Diagram versions](#diagram-versions)): `201 {version: {tag, seq, note, createdAt, size, sha256}}`. 400 `{error: 'bad_tag', message}`; 409 `{error: 'stale', message, documentVersion}` when the stored diagram's version is not `documentVersion`; 409 `{error: 'tag_taken', message}`; 409 `{error: 'version_limit', message, limit, used}`; 404 for a diagram the account does not have (or deleted) |
+| `GET /api/me/documents/<id>/versions` | `{versions: [{tag, seq, note, createdAt, size, sha256}], limit}`, newest (highest `seq`) first, deleted ones left out; `limit` is how many a diagram may keep. 404 like above |
+| `GET /api/me/documents/<id>/versions/<tag>` | `{version: {tag, seq, note, createdAt, size, sha256, documentId, name, source, imports}}`; `<tag>` may be `latest`. 404 for a tag it does not have (or deleted) |
+| `DELETE /api/me/documents/<id>/versions/<tag>` | Deletes the version's content at once; its tag stays taken. 204 (also for a tag it does not have), 400 for `latest`, 404 for a diagram the account does not have |
+| `GET /api/me/versions/resolve?name=<name>&tag=<tag or latest>` | A cloud reference: `{documentId, name, tag, seq, sha256, source, imports}`. 404 when no live diagram has the name or it has no such version; 409 `{error: 'ambiguous_name', message, documentIds}` when several do; 400 for a missing name or `bad_tag` |
+| `GET /api/me/limits` | `{plan, limits: {documents, versionsPerDocument, documentBytes}, usage: {documents}}` ([Plans and limits](#plans-and-limits)) |
 | `GET /api/me/email` | Email reminders ([below](#email-reminders)): `{email, confirmed, timeZone, streak, cards, recap, paused}`, or `{email: null}` |
 | `PUT /api/me/email {email, timeZone, streak?, cards?, recap?}` | Sets the address (`timeZone` the browser's IANA zone). A new address, or the same one still unconfirmed, gets a confirmation email: `confirmationSent: true`. 503 without the `EMAIL` binding, 502 when the send fails |
 | `PATCH /api/me/email {streak?, cards?, recap?, timeZone?, resume?}` | Which reminders; `resume: true` lifts a pause. 404 without an address |
@@ -185,9 +198,82 @@ instead ([Mobile apps](#mobile-apps)).
 | `/api/admin/*` | The [admin panel](#admin-panel): passkey sign-in and its data |
 
 Rate limits, per minute (429 with `Retry-After`): 30 test runs, 10 account
-changes or exports, 3 imports, 60 card review and activity requests, 10 daily challenge attempts (and starts), 20 game requests (runs started, submitted or synced, purchases), 10 short links, 120 synced diagram requests (`DOCS_LIMITER`), 3 reminder confirmation emails (`EMAIL_LIMITER`) and 120 achievement requests per user; 20 sign-in steps (token and revoke requests included), 120 stats
+changes or exports, 3 imports, 60 card review and activity requests, 10 daily challenge attempts (and starts), 20 game requests (runs started, submitted or synced, purchases), 10 short links, 120 synced diagram requests (`DOCS_LIMITER`; versions, resolves and `GET /api/me/limits` included), 3 reminder confirmation emails (`EMAIL_LIMITER`) and 120 achievement requests per user; 20 sign-in steps (token and revoke requests included), 120 stats
 requests (the daily challenge's cards and leaderboard, the per-problem leaderboards,
 oEmbed and metrics summaries included), 30 usage count requests, 10 design reviews and 30 admin sign-in steps (`ADMIN_LIMITER`) per IP.
+
+### Diagram versions
+
+A version is an immutable snapshot of one of the user's synced diagrams:
+its file name, source and imports as stored at that moment, with a tag the
+user picks, e.g. `2026-11-01` (`src/versions.ts`,
+`migrations/0016_versions.sql`). Times are Unix milliseconds.
+
+- **Tags** match `/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/`, are case-sensitive
+  (`v1` and `V1` are two tags) and unique per diagram. `latest` (exactly
+  that) is reserved: never a tag, and in a read it means the live version
+  with the highest `seq`. A deleted version's tag is never reusable for that
+  diagram.
+- **`seq`** counts 1, 2, 3… per diagram and is never reused, so after
+  deleting the newest version `latest` is the one before it. The live draft
+  is never `latest`.
+- **Snapshots are of the stored row**, never of what the client sends: the
+  client sends the diagram version (`document.version`) it has, and gets
+  409 `stale` with the stored `documentVersion` when that is not the stored
+  one, so it syncs (PUT) first and tags again.
+- **No change, ever**: no route edits a version. Deleting one clears its
+  name, source, imports, note and hash at once, keeping only the tag, seq
+  and times as a tombstone. Deleting the diagram (its tombstone), "Delete my
+  cloud copies" or the account deletes every version of it, tombstones too;
+  a deleted diagram restored starts with none.
+- **Limits**: a diagram keeps at most `versionsPerDocument` live versions
+  (20 on the free plan); a deleted one frees its slot.
+- **`note`** is optional, at most 280 characters; blank is stored as null.
+- **`size`** is the UTF-8 bytes of the source plus every import's source.
+- **`sha256`** is the lowercase hex SHA-256 of the UTF-8 bytes of the
+  canonical form, which the CLI and the editor recompute to check what they
+  have:
+
+  ```js
+  // imports: the path → source map as the API answers it, or null (none)
+  const pairs = Object.entries(imports ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const canonical = JSON.stringify([source, pairs]);
+  // no imports: JSON.stringify(['title "A"', []]) === '["title \\"A\\"",[]]'
+  ```
+
+  Paths sort by UTF-16 code units (JavaScript's `<`, not `localeCompare`).
+  `canonicalForm` in `src/versions.ts` is the reference.
+
+**Resolving a cloud reference** (`GET /api/me/versions/resolve`) looks only
+at the signed-in account's live (not deleted) diagrams, by name: one
+trailing `.proschi` is taken off `name`, and a diagram matches when its
+stored `name` equals what is left or that + `.proschi` (case-sensitive).
+The editor stores file names with the extension (`fileNameOf` in
+`frontend/src/playground/documents.ts`, e.g. `payments.proschi`), so
+`name=payments.proschi` and `name=payments` both find it, and both find a
+diagram stored as plain `payments`; `Payments.proschi` does not. One
+match: its version `tag` (or `latest`); none, or no such version: 404;
+more than one (two diagrams of one name, or `payments` next to
+`payments.proschi`, whichever form is asked for): 409 `ambiguous_name` with their `documentIds`, and the user renames one.
+The answer's `name` is the snapshot's: the diagram's name when it was
+tagged.
+
+### Plans and limits
+
+`users.plan` (`'free'` for everyone; no payments and no plan UI, changed
+only by SQL) picks the account's limits in `src/plans.ts`, the one place a
+paid plan will raise them. An unknown plan gets, and reports, the free
+limits.
+
+| Limit | `limitsFor(plan)` | Free |
+|---|---|---|
+| Live synced diagrams | `documents` | 5 |
+| Live versions per diagram | `versionsPerDocument` | 20 |
+| A diagram's source plus imports (as JSON), in characters | `documentBytes` | 65536 (64 KiB) |
+
+`GET /api/me/limits` answers `{plan, limits, usage: {documents}}`; `GET
+/api/me/documents` still answers `limit` and `used` for the diagrams, and
+`GET /api/me/documents/<id>/versions` `limit` for versions.
 
 ### Short links and embeds
 
@@ -571,6 +657,77 @@ Codes and tokens are random 32-byte values stored only as their SHA-256
 bearer request uses only its token, never a cookie sent along. Token and
 revoke requests count against the per-IP sign-in limit, and none of them is
 logged beyond its path.
+
+## Command line sign-in
+
+The `proschi` CLI signs in like a native app (above), as the public client
+`proschi-cli` of RFC 8252: the system browser, a loopback redirect to a
+local server the CLI runs, PKCE S256, and the same tokens. No client secret
+and no allow-list: any loopback port is accepted, nothing else.
+
+1. **Listen.** Start an HTTP server on `127.0.0.1` (or `::1`) on a free
+   port (port 0 lets the OS pick), and make a `code_verifier` (43–128 of
+   `A–Z a–z 0–9 - . _ ~`, e.g. 32 random bytes base64url), its challenge
+   `BASE64URL(SHA-256(verifier))` without padding (43 characters), and a
+   random `state`.
+2. **Open the browser** at (GitHub or Google; `GET /auth/providers` lists
+   those on offer):
+
+   ```text
+   https://proschi.app/auth/github/start?client=proschi-cli
+       &redirect_uri=http%3A%2F%2F127.0.0.1%3A53682%2Fcallback
+       &code_challenge=<challenge>&code_challenge_method=S256&state=<state>
+   ```
+
+   `redirect_uri` must be exactly `http://127.0.0.1:<port>/callback` or
+   `http://[::1]:<port>/callback`: `http`, that host, a port from 1 to 65535
+   without a leading zero, the path `/callback` and nothing else (no
+   `localhost`, trailing slash, query, fragment or userinfo). Anything else,
+   a missing or non-S256 challenge, a `state` past 256 printable ASCII
+   characters, or `link=1` is a 400 page that redirects nowhere. Only
+   `client=proschi-cli` gets loopback URIs; `client=app` still needs an
+   exact `APP_REDIRECT_URIS` entry.
+3. **Receive the callback.** The browser comes back to
+   `http://127.0.0.1:53682/callback?code=<code>&state=<state>`, or
+   `?error=access_denied&state=<state>` (cancelled, or a blocked account) /
+   `?error=server_error&state=<state>`. Check `state`, answer the browser
+   with a page saying it can be closed, and stop the server. The code works
+   once, for 60 seconds.
+4. **Exchange it** (JSON or form-encoded):
+
+   ```http
+   POST /auth/token
+   Content-Type: application/json
+
+   {"grant_type": "authorization_code", "code": "<code>", "code_verifier": "<verifier>", "redirect_uri": "http://127.0.0.1:53682/callback"}
+   ```
+
+   `redirect_uri` is optional, and must be the one of step 2 when sent. 200
+   `{"access_token", "token_type": "Bearer", "expires_in": 3600,
+   "refresh_token"}`. A wrong verifier, an expired or used code is 400
+   `{"error": "invalid_grant", "error_description"}` (the code is used up
+   either way); a missing field 400 `invalid_request`.
+5. **Call the API** with `Authorization: Bearer <access_token>` (no cookie
+   or Origin needed), e.g. `GET /api/me`, `GET /api/me/versions/resolve`.
+   An expired or revoked token is 401 with `WWW-Authenticate: Bearer
+   error="invalid_token"`: refresh, then retry once.
+6. **Refresh**: `POST /auth/token {"grant_type": "refresh_token",
+   "refresh_token": "<refresh_token>"}` answers the same shape with **both
+   tokens new**. Store the new refresh token before using the access token;
+   the old pair stops working. The access token lasts an hour, a refresh
+   token 60 days from its issue. Presenting an already rotated refresh
+   token revokes the whole sign-in (400 `invalid_grant`): never retry a
+   refresh with the same token, and serialise refreshes across CLI
+   processes (e.g. a lock file next to the stored tokens).
+7. **Sign out**: `POST /auth/revoke {"token": "<refresh_token>"}` ends that
+   sign-in, both tokens, and answers 200 whether or not the token was known;
+   then delete the stored tokens. `POST /api/me/sessions/revoke-all` and
+   deleting the account end every sign-in, the CLI's too.
+
+The CLI's tokens are `sessions` rows of kind `app_access` and
+`app_refresh`, like an app's, so the export and the admin panel show them as
+app sessions. Start, token and revoke requests count against the per-IP
+sign-in limit (20 a minute).
 
 ## Cost
 

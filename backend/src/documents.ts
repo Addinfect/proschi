@@ -1,6 +1,7 @@
 import { requireUser, type User } from './auth';
 import type { Ctx } from './context';
 import { HttpError, json, rateLimit, readJson } from './http';
+import { FREE_LIMITS, limitsFor, planName } from './plans';
 
 /**
  * The editor's diagrams in the account (cloud sync, frontend/src/playground/sync.ts).
@@ -10,16 +11,14 @@ import { HttpError, json, rateLimit, readJson } from './http';
  * 30 days by the daily cron.
  */
 
-/** Live (not deleted) documents a user on the free plan may keep. */
-export const FREE_DOCUMENT_LIMIT = 5;
-/** A document's source plus its imports (as JSON), in characters: the same as a practice design. */
-export const MAX_DOCUMENT = 64 * 1024;
+/** Live (not deleted) documents a user on the free plan may keep (src/plans.ts). */
+export const FREE_DOCUMENT_LIMIT = FREE_LIMITS.documents;
+/** A document's source plus its imports (as JSON), in characters, on the free plan: the same as a practice design. */
+export const MAX_DOCUMENT = FREE_LIMITS.documentBytes;
 /** Tombstones older than this are deleted by the daily cron. */
 export const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_NAME = 512;
 const MAX_IMPORTS = 100;
-/** The JSON of a document at its size cap, escaped. */
-const MAX_BODY = 4 * MAX_DOCUMENT;
 const NO_STORE = { 'Cache-Control': 'no-store' };
 
 export interface CloudDocument {
@@ -58,26 +57,24 @@ function documentOf(row: Row): CloudDocument {
   };
 }
 
-function checkId(id: string): string {
+export function checkId(id: string): string {
   if (!/^[A-Za-z0-9_.-]{1,100}$/.test(id)) throw new HttpError(400, 'A document id is 1 to 100 letters, digits, dots, dashes or underscores');
   return id;
 }
 
-/**
- * How many live (not deleted) documents `user` may keep in the account. The
- * one place a paid plan will raise it; everyone is on the free plan today.
- */
-export function documentLimit(_ctx: Ctx, _user: User): number {
-  return FREE_DOCUMENT_LIMIT;
+/** How many live (not deleted) documents `user` may keep in the account: its plan's (src/plans.ts). */
+export function documentLimit(_ctx: Ctx, user: User): number {
+  return limitsFor(user.plan).documents;
 }
 
-async function limited(request: Request, ctx: Ctx): Promise<User> {
+/** The signed-in user, counted against the synced diagrams' rate limit (DOCS_LIMITER). */
+export async function limited(request: Request, ctx: Ctx): Promise<User> {
   const user = await requireUser(request, ctx);
   await rateLimit(ctx.env.DOCS_LIMITER, user.id, 'Too many diagram saves; wait a minute');
   return user;
 }
 
-async function liveCount(DB: D1Database, userId: string): Promise<number> {
+export async function liveCount(DB: D1Database, userId: string): Promise<number> {
   const row = await DB.prepare('SELECT COUNT(*) AS n FROM documents WHERE user_id = ? AND deleted_at IS NULL').bind(userId).first<{ n: number }>();
   return row?.n ?? 0;
 }
@@ -127,14 +124,18 @@ export async function putDocument(request: Request, ctx: Ctx, rawId: string): Pr
   const id = checkId(rawId);
   const user = await limited(request, ctx);
   const userId = user.id;
-  const body = await readJson(request, MAX_BODY);
+  const { documentBytes } = limitsFor(user.plan);
+  // The JSON of a document at its size cap, escaped, with its name and paths.
+  const body = await readJson(request, 4 * documentBytes + 16 * 1024);
   if (typeof body.name !== 'string' || !body.name.trim() || body.name.length > MAX_NAME) throw new HttpError(400, `name must be a file name of 1 to ${MAX_NAME} characters`);
   if (typeof body.source !== 'string') throw new HttpError(400, 'source must be a string');
   const baseVersion = body.baseVersion;
   if (typeof baseVersion !== 'number' || !Number.isSafeInteger(baseVersion) || baseVersion < 0) throw new HttpError(400, 'baseVersion must be a whole number, 0 for a new document');
   const imports = readImports(body.imports);
   const importsJson = imports ? JSON.stringify(imports) : null;
-  if (body.source.length + (importsJson?.length ?? 0) > MAX_DOCUMENT) throw new HttpError(413, 'This diagram is too large to save to your account (64 KiB)');
+  if (body.source.length + (importsJson?.length ?? 0) > documentBytes) {
+    throw new HttpError(413, `This diagram is too large to save to your account (${Math.round(documentBytes / 1024)} KiB)`);
+  }
 
   const { DB } = ctx.env;
   const t = Date.now();
@@ -188,13 +189,19 @@ export async function deleteDocument(request: Request, ctx: Ctx, rawId: string):
   const baseVersion = raw === null ? null : Number(raw);
   if (baseVersion !== null && (!Number.isSafeInteger(baseVersion) || baseVersion < 0)) throw new HttpError(400, 'baseVersion must be a whole number');
   const { DB } = ctx.env;
-  const row = await DB.prepare(
-    `UPDATE documents SET name = '', source = '', imports = NULL, deleted_at = ?3, updated_at = ?3, version = version + 1
-     WHERE user_id = ?1 AND id = ?2 AND deleted_at IS NULL AND (?4 IS NULL OR version = ?4)
-     RETURNING ${COLUMNS}`,
-  )
-    .bind(userId, id, Date.now(), baseVersion)
-    .first<Row>();
+  const [tombstone] = await DB.batch([
+    DB.prepare(
+      `UPDATE documents SET name = '', source = '', imports = NULL, deleted_at = ?3, updated_at = ?3, version = version + 1
+       WHERE user_id = ?1 AND id = ?2 AND deleted_at IS NULL AND (?4 IS NULL OR version = ?4)
+       RETURNING ${COLUMNS}`,
+    ).bind(userId, id, Date.now(), baseVersion),
+    // A deleted diagram's versions (src/versions.ts) go with it, tags and all.
+    DB.prepare('DELETE FROM document_versions WHERE user_id = ?1 AND document_id = ?2 AND EXISTS (SELECT 1 FROM documents WHERE user_id = ?1 AND id = ?2 AND deleted_at IS NOT NULL)').bind(
+      userId,
+      id,
+    ),
+  ]);
+  const row = (tombstone.results as Row[])[0];
   if (row) return json({ document: documentOf(row) }, 200, NO_STORE);
   const existing = await DB.prepare(`SELECT ${COLUMNS} FROM documents WHERE user_id = ? AND id = ?`).bind(userId, id).first<Row>();
   if (!existing) return new Response(null, { status: 204 });
@@ -202,7 +209,16 @@ export async function deleteDocument(request: Request, ctx: Ctx, rawId: string):
   return json({ error: 'The diagram changed on another device', document: documentOf(existing) }, 409, NO_STORE);
 }
 
-/** DELETE /api/me/documents: "Delete my cloud copies", every document and tombstone of the account, at once. */
+/**
+ * GET /api/me/limits: the account's plan, its limits (src/plans.ts) and
+ * what it uses of them.
+ */
+export async function getLimits(request: Request, ctx: Ctx): Promise<Response> {
+  const user = await limited(request, ctx);
+  return json({ plan: planName(user.plan), limits: limitsFor(user.plan), usage: { documents: await liveCount(ctx.env.DB, user.id) } }, 200, NO_STORE);
+}
+
+/** DELETE /api/me/documents: "Delete my cloud copies", every document and tombstone of the account, at once, their versions with them (ON DELETE CASCADE). */
 export async function deleteAllDocuments(request: Request, ctx: Ctx): Promise<Response> {
   const userId = (await limited(request, ctx)).id;
   const { meta } = await ctx.env.DB.prepare('DELETE FROM documents WHERE user_id = ?').bind(userId).run();

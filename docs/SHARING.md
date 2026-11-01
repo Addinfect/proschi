@@ -9,7 +9,8 @@ with a preview image, and an embed for other pages.
 The editor's address always holds the whole document, compressed after
 `#code=`. **Share → Copy link** copies it. Imported files travel in the same
 link (`&imports=`), so it renders the same for someone who has none of
-them. The part after `#` never reaches a server, so nothing is stored and
+them. That includes the [saved versions](VERSIONS.md) a diagram reads with
+`cloud:`, so the viewer needs no account. The part after `#` never reaches a server, so nothing is stored and
 the link works offline.
 
 While a use case plays, the link also names the use case, the scenario and

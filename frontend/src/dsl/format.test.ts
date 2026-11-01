@@ -61,15 +61,37 @@ const messy: [string, string][] = [
   ['keywords as ids', `traffic [REST API]\ntest "Runner" x2\ndecision "Engine" [REST API]\ntraffic -> test\n`],
 ];
 
+/** Every `.proschi` file in the repository: practice problems, fixtures, docs images, the GitHub action's tests. */
+const files = Object.entries(
+  import.meta.glob(['../**/*.proschi', '../../../docs/**/*.proschi', '../../../tooling/test/**/*.proschi', '../../../action/test/**/*.proschi'], {
+    query: '?raw',
+    import: 'default',
+    eager: true,
+  }) as Record<string, string>,
+);
+
+/** Every ```proschi fence of the docs and the blog. */
+const fences = Object.entries(
+  import.meta.glob(['../../../docs/*.md', '../../../blog/*.md'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>,
+).flatMap(([path, md]) => [...md.matchAll(/^```proschi[^\n]*\n([\s\S]*?)^```/gm)].map((m, i): [string, string] => [`${path} fence ${i + 1}`, m[1]]));
+
 const corpus: [string, string][] = [
   ...examples.map((e): [string, string] => [`example ${e.id}`, e.source]),
   ...landingSnippets.map((s, i): [string, string] => [`landing snippet ${i + 1}`, s]),
+  ...files,
+  ...fences,
   ...messy,
 ];
 
 describe('format', () => {
   it('finds the landing page snippets', () => {
     expect(landingSnippets.length).toBeGreaterThan(1);
+  });
+
+  it('finds the .proschi files and docs fences, systems among them', () => {
+    expect(files.length).toBeGreaterThan(100);
+    expect(fences.length).toBeGreaterThan(30);
+    expect([...files, ...fences].filter(([, s]) => /^\s*system\s/m.test(s)).length).toBeGreaterThan(5);
   });
 
   it.each(corpus)('%s: is idempotent', (_name, source) => {
@@ -229,5 +251,89 @@ describe('format', () => {
   it('moves the rest of a node line into an empty team column', () => {
     const src = 'api  "API"   [REST API]    @backend\nnote "Note" [Sticky Note] "Read me first"\n';
     expect(format(src)).toBe('api  "API"  [REST API]    @backend\nnote "Note" [Sticky Note] "Read me first"\n');
+  });
+
+  describe('systems', () => {
+    it('keeps a dotted reference to an exposed entry tight', () => {
+      const src = 'title "Org"\nweb "Web" [React]\nsystem orders "Orders" @orders {\n  from "cloud:orders:latest"\n  expose api "API" -> "Place order"\n  capacity { rps 500 }\n}\nweb -> orders.api\n';
+      expect(format(src)).toBe(src);
+      expect(format('web->orders.api\n')).toBe('web -> orders.api\n');
+    });
+
+    it('keeps dotted references tight with every arrow, label and tag', () => {
+      const src = [
+        'system orders {',
+        '  expose api -> "Place order"',
+        '  expose admin -> "Refund"',
+        '}',
+        'web->orders.api:HTTPS',
+        'orders.admin-->web : 200',
+        'web ->> orders.api',
+        'web -x orders.admin : drops',
+        'web -> orders.api .planned : later',
+        'a.b -> orders.api',
+        '',
+      ].join('\n');
+      expect(format(src)).toBe(
+        [
+          'system orders {',
+          '  expose api -> "Place order"',
+          '  expose admin -> "Refund"',
+          '}',
+          'web           -> orders.api          : HTTPS',
+          'orders.admin --> web                 : 200',
+          'web          ->> orders.api',
+          'web           -x orders.admin        : drops',
+          'web           -> orders.api .planned : later',
+          'a.b           -> orders.api',
+          '',
+        ].join('\n'),
+      );
+    });
+
+    it('keeps dotted references tight in use case, alt and par steps', () => {
+      const src = 'usecase "U" {\nweb->orders.api : POST /orders\nalt "Down" {\npar {\norders.api-->web:503\n}\n}  alt "Up" {\norders.api --> web : 201\n}\n}\n';
+      expect(format(src)).toBe(
+        'usecase "U" {\n  web -> orders.api : POST /orders\n  alt "Down" {\n    par {\n      orders.api --> web : 503\n    }\n  } alt "Up" {\n    orders.api --> web : 201\n  }\n}\n',
+      );
+    });
+
+    it('keeps dotted references tight in chains and lines it cannot align', () => {
+      expect(format('web  ->  orders.api  ->  db\n')).toBe('web -> orders.api -> db\n');
+    });
+
+    it('lays out system blocks in one-line and multi-line forms', () => {
+      expect(format('system   orders   "Orders"   @orders   {   }\n')).toBe('system orders "Orders" @orders { }\n');
+      expect(format('system orders{\nfrom   "orders.proschi"\n     expose api->"Place order"\nexpose   admin  "Admin"   ->   "Refund"\n}\n')).toBe(
+        'system orders {\n  from "orders.proschi"\n  expose api -> "Place order"\n  expose admin "Admin" -> "Refund"\n}\n',
+      );
+      expect(format('system orders "Orders" {\n  capacity {\nrps   500\n      latency 20ms\n  }\n}\n')).toBe('system orders "Orders" {\n  capacity {\n    rps 500\n    latency 20ms\n  }\n}\n');
+      expect(format('system orders {\ncapacity {   rps 500   latency  20ms }\n}\n')).toBe('system orders {\n  capacity { rps 500 latency 20ms }\n}\n');
+    });
+
+    it('keeps every kind of from path verbatim', () => {
+      for (const path of ['teams/orders.proschi', 'git:github.com/acme/orders//design/orders.proschi@v2.3.0', 'https://example.com/orders.proschi', 'cloud:orders:latest', 'cloud:orders:2026-11-01', 'cloud:acme/orders//sub/path:latest']) {
+        const src = `system orders {\n  from "${path}"\n  expose api -> "Place order"\n}\nweb -> orders.api\n`;
+        expect(format(src)).toBe(src);
+      }
+    });
+
+    it('keeps comments and tidies blank lines in and around a system', () => {
+      const src = '# Orders team\n\n\nsystem orders "Orders" { # the box\n\n  # its design\n  from "orders.proschi"   # pinned\n\n\n  expose api -> "Place order"\n\n}\n\n\nweb -> orders.api # calls it\n';
+      expect(format(src)).toBe(
+        '# Orders team\n\nsystem orders "Orders" { # the box\n  # its design\n  from "orders.proschi" # pinned\n\n  expose api -> "Place order"\n}\n\nweb -> orders.api # calls it\n',
+      );
+    });
+
+    it('indents a system inside a group', () => {
+      expect(format('group g {\nsystem orders {\nexpose api -> "U"\n}\n}\n')).toBe('group g {\n  system orders {\n    expose api -> "U"\n  }\n}\n');
+    });
+
+    it('keeps the meaning and is idempotent on systems', () => {
+      const src = 'web [React]\nsystem orders "Orders" @o { from "cloud:orders:latest"\n}\nsystem billing{\n capacity {\n rps 10\n }\n expose pay->"Pay"\n}\nweb->orders.api:x\nweb -> billing.pay\nusecase "U" {\nweb->billing.pay:POST\n}\n';
+      const once = format(src);
+      expect(meaning(once)).toEqual(meaning(src));
+      expect(format(once)).toBe(once);
+    });
   });
 });

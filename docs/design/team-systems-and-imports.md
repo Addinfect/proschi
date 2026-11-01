@@ -151,3 +151,8 @@ document.
   the link.
 - **I6. Out of scope:** a fetch proxy for the browser, a host allowlist,
   workspace aliases.
+
+## Versions and cloud references
+
+Versions of saved diagrams and `cloud:` sources, including the one
+exception to I5, are recorded in [versions-and-cloud.md](versions-and-cloud.md).

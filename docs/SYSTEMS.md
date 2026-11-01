@@ -134,6 +134,30 @@ your own `git` and credentials. Every other command, and the editors, read
 the cached copy. In CI, run `proschi imports sync --frozen` before
 `proschi test`: it fails instead of changing the lock.
 
+## 6. Use a saved version from your account
+
+When a team's design lives in your Proschi account, point `from` at one of
+its [saved versions](VERSIONS.md) with a `cloud:` source:
+
+```proschi fragment
+system orders "Order Processing" @Orders {
+  from "cloud:orders:latest"
+  expose api "Orders API" -> "Place order"
+}
+```
+
+- `cloud:orders:2026-11-01` pins the box to one version. It never changes,
+  so the org diagram shows the design as it was on that day.
+- `cloud:orders:latest`, or `cloud:orders`, follows the newest version the
+  team saved. It never reads the unsaved draft.
+- `orders` is the diagram's file name in your account, without spaces.
+
+The **Copy reference** button in **Diagrams → Versions…** copies the
+reference, or a whole `system` block. The editor fetches the version from
+your own account only, and a share link carries it, so viewers need no
+account. The command line pins it in `proschi.lock`: see
+[cloud sources](IMPORTS.md#cloud-sources).
+
 ## The system block
 
 ```proschi fragment
@@ -148,7 +172,7 @@ the block, one line each:
 
 | Line | Meaning |
 |---|---|
-| `from "path"` | The team's design file, found like an [import](IMPORTS.md): a local path, `git:` or `https://`. |
+| `from "path"` | The team's design file, found like an [import](IMPORTS.md): a local path, `git:`, `https://` or `cloud:`. |
 | `expose id ["Name"] [-> "Use case"]` | An entry point, and the team's use case it enters. Without a `from`, leave the use case out. With one, you may leave it out when the team file has a single use case. |
 | `capacity { … }` | A stub for a team with no design file: the rate where it saturates, and its `p99` (or `latency`) and `availability`. |
 

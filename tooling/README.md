@@ -16,6 +16,9 @@ proschi analyze shortener.proschi   # load, latency, availability and cost per n
 proschi import mermaid arch.mmd     # Mermaid flowchart/sequence diagram to Proschi (also: import openapi spec.yaml)
 proschi problem check               # validate practice problem folders (see docs/PRACTICE.md)
 proschi problem new seat-map        # scaffold a practice problem
+proschi imports sync                # fetch git:, https:// and cloud: imports into proschi.lock and .proschi/cache
+proschi login                       # sign in to your proschi.app account (for cloud: imports and versions)
+proschi versions diff orders v1     # what changed in a saved diagram since version v1
 proschi-language-server --stdio     # for any editor with an LSP client
 ```
 
@@ -43,6 +46,36 @@ its lesson section and review cards), with the same rules as the practice
 page's test suite; `problem new <id> [--dir <dir>]` scaffolds one. Inside the
 repository both default to `frontend/src/practice/problems`. The format and
 the rules: [docs/PRACTICE.md](https://github.com/gvart/proschi/blob/main/docs/PRACTICE.md).
+
+## Remote imports, sign-in and versions
+
+`proschi imports sync [--frozen | --update [<cloud:spec>...]] [<file|dir>...]` downloads the `git:`,
+`https://` and `cloud:` imports of the files into `.proschi/cache` and pins
+each in `proschi.lock` (commit it): a git ref to its commit, an https file
+to its sha256, and `cloud:<name>` (the newest saved version) or
+`cloud:<name>:<tag>` to the version's concrete tag, seq and sha256. A pinned
+import stays pinned on later syncs. `--update` moves the given
+`cloud:<name>` imports (default: every one) to the newest saved version and
+prints each old and new tag; a concrete `cloud:<name>:<tag>` never moves (to
+move a git or https pin, delete its entry from `proschi.lock`). `--frozen` (for CI) fails instead of changing the lock. Every other
+command (`check`, `render`, `share-link`, the language server) reads the lock
+and the cache only and never fetches.
+
+`cloud:` imports are diagrams saved in your own account, so they need
+`proschi login` first. It opens the browser to sign in (and prints the link,
+for a machine without one), takes the answer on a one-time
+`http://127.0.0.1:<port>/callback`, and stores the tokens in
+`$XDG_CONFIG_HOME/proschi/credentials.json` (`~/.config/proschi/…`, or
+`%APPDATA%\proschi\…` on Windows), readable by you only. `proschi logout`
+ends the sign-in and deletes them; `proschi whoami` prints the account.
+
+`proschi versions list <name>` prints a diagram's saved versions, and
+`proschi versions diff <name> <base-tag> [<target-tag>|<file.proschi>]` what
+changed from one to another (default: latest) or to a local file: nodes,
+edges, use cases, scenarios, requirements, traffic, capacity and systems,
+with `--json` for scripts. They only read the account. `--base <url>` points
+`login`, `logout`, `whoami`, `versions` and `imports sync` at another site
+(https, or http://localhost for development).
 
 ## Rendering
 

@@ -143,6 +143,7 @@ const TABLES = [
   'game_runs',
   'shares',
   'documents',
+  'document_versions',
   'email_prefs',
   'daily_counts',
   'app_events',
@@ -314,7 +315,7 @@ export async function getUser(request: Request, ctx: Ctx, id: string): Promise<R
   const { DB } = ctx.env;
   const user = await DB.prepare('SELECT * FROM users WHERE id = ?').bind(id).first<Record<string, string | number | null>>();
   if (!user) throw new HttpError(404, 'No such user');
-  const [identities, sessions, progress, cards, achievements, challenges, game, shares, documents, email, lessons, audit] = await DB.batch([
+  const [identities, sessions, progress, cards, achievements, challenges, game, shares, documents, versions, email, lessons, audit] = await DB.batch([
     DB.prepare('SELECT provider, subject FROM identities WHERE user_id = ? ORDER BY provider').bind(id),
     DB.prepare('SELECT kind, COUNT(*) AS n, MAX(created_at) AS last_created FROM sessions WHERE user_id = ? AND expires_at > ? GROUP BY kind').bind(id, now()),
     DB.prepare('SELECT problem_id, runs, first_run_at, updated_at, solved_at, runs_to_solve FROM progress WHERE user_id = ? ORDER BY updated_at DESC').bind(id),
@@ -324,6 +325,7 @@ export async function getUser(request: Request, ctx: Ctx, id: string): Promise<R
     DB.prepare('SELECT COUNT(*) AS runs, COALESCE(SUM(submitted_at IS NOT NULL), 0) AS submitted, MAX(score) AS best, MAX(started_at) AS last FROM game_runs WHERE user_id = ?').bind(id),
     DB.prepare('SELECT id, title, created_at, image IS NOT NULL AS has_image FROM shares WHERE user_id = ? ORDER BY created_at DESC').bind(id),
     DB.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(length(source)), 0) AS bytes, MAX(updated_at) AS last FROM documents WHERE user_id = ? AND deleted_at IS NULL').bind(id),
+    DB.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(size), 0) AS bytes FROM document_versions WHERE user_id = ? AND deleted_at IS NULL').bind(id),
     DB.prepare('SELECT email, confirmed_at, paused_at, streak_on, cards_on, recap_on, time_zone, last_sent_at FROM email_prefs WHERE user_id = ?').bind(id),
     DB.prepare('SELECT COUNT(*) AS n FROM lesson_reads WHERE user_id = ?').bind(id),
     DB.prepare('SELECT id, at, action, detail FROM admin_audit WHERE target = ? ORDER BY id DESC LIMIT 20').bind(id),
@@ -342,6 +344,7 @@ export async function getUser(request: Request, ctx: Ctx, id: string): Promise<R
         lastSeenDay: user.last_seen_day,
         blockedAt: user.blocked_at,
         blockedReason: user.blocked_reason,
+        plan: user.plan,
       },
       identities: identities.results,
       sessions: (sessions.results as Row[]).map((r) => ({ kind: r.kind, count: r.n, lastCreatedAt: r.last_created })),
@@ -360,6 +363,7 @@ export async function getUser(request: Request, ctx: Ctx, id: string): Promise<R
       game: { runs: first(game).runs ?? 0, submitted: first(game).submitted ?? 0, best: first(game).best ?? null, lastStartedAt: first(game).last ?? null },
       shares: (shares.results as Row[]).map((r) => ({ id: r.id, title: r.title, createdAt: r.created_at, hasImage: r.has_image === 1 })),
       documents: { count: first(documents).n ?? 0, bytes: first(documents).bytes ?? 0, lastUpdatedAt: first(documents).last ?? null },
+      documentVersions: { count: first(versions).n ?? 0, bytes: first(versions).bytes ?? 0 },
       email: e
         ? {
             address: maskEmail(String(e.email)),

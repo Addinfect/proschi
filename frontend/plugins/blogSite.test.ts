@@ -55,6 +55,13 @@ describe('posts', () => {
     expect(r.html).not.toMatch(/href="(?!https?:|#|\.\.\/\.\.\/)/)
   })
 
+  it('puts the newer release first when two posts share a day', () => {
+    for (let i = 1; i < posts.length; i++) {
+      const [a, b] = [posts[i - 1], posts[i]]
+      if (a.date === b.date && a.version && b.version) expect(a.version.localeCompare(b.version, 'en', { numeric: true })).toBeGreaterThan(0)
+    }
+  })
+
   it('publishes a post\'s images next to its page', () => {
     const r = rendered.find((x) => x.images.length > 0)!
     expect(r.html).toMatch(new RegExp(`<img src="${r.images[0].name}" alt="[^"]+" loading="lazy" />`))

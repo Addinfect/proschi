@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BLANK_SOURCE, addDoc, currentDoc, initialState, isBlank, removeDoc, selectDoc, titleOf, updateCurrent } from './documents';
+import { BLANK_SOURCE, addDoc, cloudImports, currentDoc, initialState, isBlank, removeDoc, selectDoc, storedImports, titleOf, updateCurrent } from './documents';
 
 const clock = () => '2026-01-01T00:00:00.000Z';
 const ids = () => {
@@ -39,6 +39,19 @@ describe('initialState', () => {
     const state = initialState({ ...base, stored, sharedSource: 'same' }, clock, ids());
     expect(state.docs).toHaveLength(2);
     expect(state.currentId).toBe('x');
+  });
+
+  it('never stores the cloud: files a share link bundles, and drops ones saved before', () => {
+    const sharedImports = { 'db.proschi': 'db [PostgreSQL]', 'cloud:orders:latest': 'api', 'cloud:orders:latest//lib/db.proschi': 'db', 'CLOUD:x:v1': 'x' };
+    const opened = initialState({ ...base, sharedSource: 'import "cloud:orders"', sharedImports }, clock, ids());
+    expect(currentDoc(opened).imports).toEqual({ 'db.proschi': 'db [PostgreSQL]' });
+    expect(cloudImports(sharedImports)).toEqual({ 'cloud:orders:latest': 'api', 'cloud:orders:latest//lib/db.proschi': 'db', 'CLOUD:x:v1': 'x' });
+    // Reloading the link onto the saved copy adds none either.
+    expect(currentDoc(initialState({ ...base, stored: opened, sharedSource: 'import "cloud:orders"', sharedImports }, clock, ids())).imports).toEqual({ 'db.proschi': 'db [PostgreSQL]' });
+    // A diagram stored with them (before this rule) loses them on load.
+    const stored = { docs: [{ id: 'x', source: 's', updatedAt: clock(), imports: { 'cloud:orders:latest': 'api' } }], currentId: 'x' };
+    expect(currentDoc(initialState({ ...base, stored }, clock, ids()))).not.toHaveProperty('imports');
+    expect(storedImports({ 'cloud:a:latest': 'a' })).toBeUndefined();
   });
 
   it('repairs a dangling current id', () => {

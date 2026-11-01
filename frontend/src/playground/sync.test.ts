@@ -32,6 +32,13 @@ describe('cloud sync merge', () => {
     expect(pendingOps(result.state, result.meta)).toEqual([]);
   });
 
+  it('drops cloud: files from a diagram in the account, and sends it back without them', () => {
+    const withCloud = { ...remote('a', 'import "cloud:orders"\n', 1), imports: { 'cloud:orders:latest': 'api', 'db.proschi': 'db' } };
+    const result = applyRemote({ docs: [local('x', 'x')], currentId: 'x' }, emptyMeta('u1'), [withCloud], clock, ids);
+    expect(result.state.docs.find((d) => d.id === 'a')?.imports).toEqual({ 'db.proschi': 'db' });
+    expect(pendingOps(result.state, result.meta)).toContainEqual(expect.objectContaining({ kind: 'put', id: 'a', body: expect.objectContaining({ imports: { 'db.proschi': 'db' } }) }));
+  });
+
   it('ignores versions it already has', () => {
     const a = local('a', 'mine');
     const before = state(a);

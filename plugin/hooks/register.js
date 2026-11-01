@@ -487,124 +487,6 @@ var require_lz_string = __commonJS({
 // ../plugin/src/register.tsx
 import { atom, memberOf, read, update } from "claude-code";
 
-// ../frontend/src/dsl/imports.ts
-var ImportError = class extends Error {
-  name = "ImportError";
-};
-var MAX_SPEC_LENGTH = 1024;
-var SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9._ +-]*$/;
-var HOST = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*(?::\d{1,5})?$/;
-var REPO_SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9._-]*$/;
-var REF = /^[A-Za-z0-9_][A-Za-z0-9._/-]*$/;
-var SCHEME = /^([A-Za-z][A-Za-z0-9+.-]+):/;
-function isRemoteSpec(spec) {
-  return SCHEME.test(spec);
-}
-function isAbsolutePath(path) {
-  return /^[\\/]/.test(path) || /^[A-Za-z]:/.test(path);
-}
-function checkRef(ref, spec) {
-  if (!REF.test(ref) || ref.length > 200 || ref.includes("..") || ref.includes("//") || ref.endsWith("/") || ref.endsWith(".") || ref.endsWith(".lock") || ref.split("/").some((p) => p.startsWith("."))) {
-    throw new ImportError(`'${spec}' has an invalid ref '${ref}'; use a tag, branch or commit made of letters, digits, '.', '_', '-' and '/'`);
-  }
-}
-function repoPathSegments(path, spec) {
-  const parts = path.split("/");
-  if (!path || parts.some((p) => !SEGMENT.test(p) || p === "." || p === "..")) {
-    throw new ImportError(`'${spec}' has an invalid path in the repository; use a relative path like dir/file.proschi, without '..'`);
-  }
-  return parts;
-}
-function parseRemoteSpec(spec) {
-  const scheme = SCHEME.exec(spec)?.[1].toLowerCase();
-  if (!scheme) return void 0;
-  if (spec.length > MAX_SPEC_LENGTH) throw new ImportError(`Import source is longer than ${MAX_SPEC_LENGTH} characters`);
-  if (/[\s\0\\]/.test(spec)) throw new ImportError(`'${spec}' contains whitespace or a backslash`);
-  if (scheme === "git") {
-    const body = spec.slice(4);
-    const at = body.lastIndexOf("@");
-    const split2 = body.indexOf("//");
-    if (at === -1 || split2 === -1 || split2 > at) {
-      throw new ImportError(`'${spec}' is not a git source; write git:<host>/<org>/<repo>//<path/in/repo>@<ref>`);
-    }
-    const repo = body.slice(0, split2);
-    const path = body.slice(split2 + 2, at);
-    const ref = body.slice(at + 1);
-    const [host, ...names] = repo.split("/");
-    if (!HOST.test(host) || names.length < 2 || names.some((n) => !REPO_SEGMENT.test(n) || n.endsWith("."))) {
-      throw new ImportError(`'${spec}' names an invalid repository '${repo}'; write <host>/<org>/<repo>`);
-    }
-    repoPathSegments(path, spec);
-    checkRef(ref, spec);
-    return { kind: "git", repo, path, ref };
-  }
-  if (scheme === "http") throw new ImportError(`'${spec}' uses http://; only https:// imports are allowed`);
-  if (scheme !== "https") throw new ImportError(`'${spec}' is not a supported import source; use a relative path, git: or https://`);
-  let url;
-  try {
-    url = new URL(spec);
-  } catch {
-    throw new ImportError(`'${spec}' is not a valid URL`);
-  }
-  if (url.username || url.password) throw new ImportError(`'${spec}' contains credentials; git and https imports use your own credentials, never ones in the diagram`);
-  if (url.hash) throw new ImportError(`'${spec}' has a #fragment; remove it`);
-  if (!HOST.test(url.host)) throw new ImportError(`'${spec}' has an invalid host`);
-  return { kind: "https", url: url.href };
-}
-function formatRemoteSpec(spec) {
-  return spec.kind === "git" ? `git:${spec.repo}//${spec.path}@${spec.ref}` : spec.url;
-}
-function resolveImportPath(fromPath, importPath) {
-  if (importPath.includes("\0")) throw new ImportError(`'${importPath.replace(/\0/g, "")}' contains a NUL character`);
-  const remote = parseRemoteSpec(importPath);
-  if (remote) return formatRemoteSpec(remote);
-  if (isAbsolutePath(importPath)) throw new ImportError(`'${importPath}' is an absolute path; imports must be relative to the importing file`);
-  const from = fromPath && isRemoteSpec(fromPath) ? parseRemoteSpec(fromPath) : void 0;
-  if (from?.kind === "git") {
-    const parts2 = from.path.split("/").slice(0, -1);
-    for (const part of importPath.split("/")) {
-      if (part === "" || part === ".") continue;
-      if (part !== "..") parts2.push(part);
-      else if (parts2.length > 0) parts2.pop();
-      else throw new ImportError(`'${importPath}' leaves the repository ${from.repo}`);
-    }
-    repoPathSegments(parts2.join("/"), importPath);
-    return formatRemoteSpec({ ...from, path: parts2.join("/") });
-  }
-  if (from?.kind === "https") {
-    const base = new URL(from.url);
-    const url = new URL(importPath, base);
-    if (url.origin !== base.origin) throw new ImportError(`'${importPath}' leaves ${base.origin}`);
-    return formatRemoteSpec(parseRemoteSpec(url.href));
-  }
-  const parts = !fromPath ? [] : fromPath.split("/").slice(0, -1);
-  for (const part of importPath.split("/")) {
-    if (part === "" || part === ".") continue;
-    if (part === ".." && parts.length > 0 && parts[parts.length - 1] !== "..") parts.pop();
-    else parts.push(part);
-  }
-  return parts.join("/");
-}
-function joinImportPath(fromPath, importPath) {
-  try {
-    return resolveImportPath(fromPath, importPath);
-  } catch (e) {
-    if (e instanceof ImportError) return void 0;
-    throw e;
-  }
-}
-function mapResolver(files) {
-  const paths = Object.keys(files).filter((p) => !isRemoteSpec(p));
-  return (importPath, fromPath) => {
-    const path = resolveImportPath(fromPath, importPath);
-    if (Object.prototype.hasOwnProperty.call(files, path)) return { path, source: files[path] };
-    if (isRemoteSpec(path)) return void 0;
-    const name = path.split("/").pop();
-    const sameName = paths.filter((p) => p.split("/").pop() === name);
-    return sameName.length === 1 ? { path: sameName[0], source: files[sameName[0]] } : void 0;
-  };
-}
-
 // ../frontend/src/catalog/componentCatalog.ts
 var componentCatalog = [
   // Generic Shapes
@@ -1090,6 +972,19 @@ var BracketCounter = class {
     return this.depth;
   }
 };
+function qualify(tokens) {
+  let out;
+  for (let i = 0; i < tokens.length; i++) {
+    const [t, next] = [tokens[i], tokens[i + 1]];
+    const joined = t.kind === "ident" && next?.kind === "tag" && next.col === t.col + t.length;
+    if (joined && (tokens[i + 2]?.kind === "arrow" || tokens[i - 1]?.kind === "arrow")) {
+      out ??= tokens.slice(0, i);
+      out.push({ ...t, value: `${t.value}.${next.value}`, length: t.length + next.length });
+      i++;
+    } else out?.push(t);
+  }
+  return out ?? tokens;
+}
 
 // ../frontend/src/dsl/paths.ts
 var PARAM = /^\{[^{}/]+\}$/;
@@ -3450,19 +3345,6 @@ function expand(items) {
   }
   return paths;
 }
-function qualify(tokens) {
-  let out;
-  for (let i = 0; i < tokens.length; i++) {
-    const [t, next] = [tokens[i], tokens[i + 1]];
-    const joined = t.kind === "ident" && next?.kind === "tag" && next.col === t.col + t.length;
-    if (joined && (tokens[i + 2]?.kind === "arrow" || tokens[i - 1]?.kind === "arrow")) {
-      out ??= tokens.slice(0, i);
-      out.push({ ...t, value: `${t.value}.${next.value}`, length: t.length + next.length });
-      i++;
-    } else out?.push(t);
-  }
-  return out ?? tokens;
-}
 function findUseCaseIn(diagram, name) {
   const lower = name.toLowerCase();
   return diagram.useCases.find((u) => u.name === name) ?? diagram.useCases.find((u) => u.name.toLowerCase() === lower) ?? diagram.useCases.find((u) => u.id === name);
@@ -3561,6 +3443,162 @@ function describe(token) {
     default:
       return `'${token.value}'`;
   }
+}
+
+// ../frontend/src/dsl/imports.ts
+var ImportError = class extends Error {
+  name = "ImportError";
+};
+var LATEST_TAG = "latest";
+var VERSION_TAG = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+var CLOUD_NAME_SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9._+-]*$/;
+var MAX_CLOUD_NAME = 200;
+var MAX_SPEC_LENGTH = 1024;
+var SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9._ +-]*$/;
+var HOST = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*(?::\d{1,5})?$/;
+var REPO_SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9._-]*$/;
+var REF = /^[A-Za-z0-9_][A-Za-z0-9._/-]*$/;
+var SCHEME = /^([A-Za-z][A-Za-z0-9+.-]+):/;
+function isRemoteSpec(spec) {
+  return SCHEME.test(spec);
+}
+function isAbsolutePath(path) {
+  return /^[\\/]/.test(path) || /^[A-Za-z]:/.test(path);
+}
+function checkRef(ref, spec) {
+  if (!REF.test(ref) || ref.length > 200 || ref.includes("..") || ref.includes("//") || ref.endsWith("/") || ref.endsWith(".") || ref.endsWith(".lock") || ref.split("/").some((p) => p.startsWith("."))) {
+    throw new ImportError(`'${spec}' has an invalid ref '${ref}'; use a tag, branch or commit made of letters, digits, '.', '_', '-' and '/'`);
+  }
+}
+function repoPathSegments(path, spec) {
+  const parts = path.split("/");
+  if (!path || parts.some((p) => !SEGMENT.test(p) || p === "." || p === "..")) {
+    throw new ImportError(`'${spec}' has an invalid path in the repository; use a relative path like dir/file.proschi, without '..'`);
+  }
+  return parts;
+}
+function parseRemoteSpec(spec) {
+  const scheme = SCHEME.exec(spec)?.[1].toLowerCase();
+  if (!scheme) return void 0;
+  if (spec.length > MAX_SPEC_LENGTH) throw new ImportError(`Import source is longer than ${MAX_SPEC_LENGTH} characters`);
+  if (/[\s\0\\]/.test(spec)) throw new ImportError(`'${spec}' contains whitespace or a backslash`);
+  if (scheme === "git") {
+    const body = spec.slice(4);
+    const at = body.lastIndexOf("@");
+    const split2 = body.indexOf("//");
+    if (at === -1 || split2 === -1 || split2 > at) {
+      throw new ImportError(`'${spec}' is not a git source; write git:<host>/<org>/<repo>//<path/in/repo>@<ref>`);
+    }
+    const repo = body.slice(0, split2);
+    const path = body.slice(split2 + 2, at);
+    const ref = body.slice(at + 1);
+    const [host, ...names] = repo.split("/");
+    if (!HOST.test(host) || names.length < 2 || names.some((n) => !REPO_SEGMENT.test(n) || n.endsWith("."))) {
+      throw new ImportError(`'${spec}' names an invalid repository '${repo}'; write <host>/<org>/<repo>`);
+    }
+    repoPathSegments(path, spec);
+    checkRef(ref, spec);
+    return { kind: "git", repo, path, ref };
+  }
+  if (scheme === "cloud") return parseCloudSpec(spec);
+  if (scheme === "http") throw new ImportError(`'${spec}' uses http://; only https:// imports are allowed`);
+  if (scheme !== "https") throw new ImportError(`'${spec}' is not a supported import source; use a relative path, git:, https:// or cloud:`);
+  let url;
+  try {
+    url = new URL(spec);
+  } catch {
+    throw new ImportError(`'${spec}' is not a valid URL`);
+  }
+  if (url.username || url.password) throw new ImportError(`'${spec}' contains credentials; git and https imports use your own credentials, never ones in the diagram`);
+  if (url.hash) throw new ImportError(`'${spec}' has a #fragment; remove it`);
+  if (!HOST.test(url.host)) throw new ImportError(`'${spec}' has an invalid host`);
+  return { kind: "https", url: url.href };
+}
+function parseCloudSpec(spec) {
+  const body = spec.slice("cloud:".length);
+  const split2 = body.indexOf("//");
+  const head = split2 === -1 ? body : body.slice(0, split2);
+  const parts = head.split(":");
+  if (parts.length > 2) throw new ImportError(`'${spec}' is not a cloud source; write cloud:<name> or cloud:<name>:<tag>`);
+  const name = parts[0].endsWith(".proschi") ? parts[0].slice(0, -".proschi".length) : parts[0];
+  if (!name || name.length > MAX_CLOUD_NAME || name.split("/").some((p) => !CLOUD_NAME_SEGMENT.test(p) || p === "." || p === "..")) {
+    throw new ImportError(
+      `'${spec}' names an invalid diagram '${parts[0]}'; use the diagram's file name (letters, digits, '.', '_', '+', '-' and '/', no spaces), with or without .proschi`
+    );
+  }
+  const tag = parts.length === 2 ? parts[1] : LATEST_TAG;
+  if (!VERSION_TAG.test(tag)) {
+    throw new ImportError(`'${spec}' has an invalid version tag '${tag}'; use up to 64 letters, digits, '.', '_' and '-', starting with a letter or digit, e.g. 2026-11-01`);
+  }
+  if (split2 === -1) return { kind: "cloud", name, tag };
+  return { kind: "cloud", name, tag, path: repoPathSegments(body.slice(split2 + 2), spec).join("/") };
+}
+function formatRemoteSpec(spec) {
+  if (spec.kind === "cloud") return `cloud:${spec.name}:${spec.tag}${spec.path ? `//${spec.path}` : ""}`;
+  return spec.kind === "git" ? `git:${spec.repo}//${spec.path}@${spec.ref}` : spec.url;
+}
+function resolveImportPath(fromPath, importPath) {
+  if (importPath.includes("\0")) throw new ImportError(`'${importPath.replace(/\0/g, "")}' contains a NUL character`);
+  const remote = parseRemoteSpec(importPath);
+  if (remote?.kind === "cloud" && fromPath && isRemoteSpec(fromPath) && parseRemoteSpec(fromPath)?.kind !== "cloud") {
+    throw new ImportError(`'${importPath}' is a cloud import inside ${fromPath}; cloud: sources only work from your own diagrams`);
+  }
+  if (remote) return formatRemoteSpec(remote);
+  if (isAbsolutePath(importPath)) throw new ImportError(`'${importPath}' is an absolute path; imports must be relative to the importing file`);
+  const from = fromPath && isRemoteSpec(fromPath) ? parseRemoteSpec(fromPath) : void 0;
+  if (from?.kind === "cloud") {
+    const parts2 = (from.path ?? "").split("/").slice(0, -1);
+    for (const part of importPath.split("/")) {
+      if (part === "" || part === ".") continue;
+      if (part !== "..") parts2.push(part);
+      else if (parts2.length > 0) parts2.pop();
+      else throw new ImportError(`'${importPath}' leaves the files saved with cloud:${from.name}:${from.tag}`);
+    }
+    return formatRemoteSpec({ ...from, path: repoPathSegments(parts2.join("/"), importPath).join("/") });
+  }
+  if (from?.kind === "git") {
+    const parts2 = from.path.split("/").slice(0, -1);
+    for (const part of importPath.split("/")) {
+      if (part === "" || part === ".") continue;
+      if (part !== "..") parts2.push(part);
+      else if (parts2.length > 0) parts2.pop();
+      else throw new ImportError(`'${importPath}' leaves the repository ${from.repo}`);
+    }
+    repoPathSegments(parts2.join("/"), importPath);
+    return formatRemoteSpec({ ...from, path: parts2.join("/") });
+  }
+  if (from?.kind === "https") {
+    const base = new URL(from.url);
+    const url = new URL(importPath, base);
+    if (url.origin !== base.origin) throw new ImportError(`'${importPath}' leaves ${base.origin}`);
+    return formatRemoteSpec(parseRemoteSpec(url.href));
+  }
+  const parts = !fromPath ? [] : fromPath.split("/").slice(0, -1);
+  for (const part of importPath.split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === ".." && parts.length > 0 && parts[parts.length - 1] !== "..") parts.pop();
+    else parts.push(part);
+  }
+  return parts.join("/");
+}
+function joinImportPath(fromPath, importPath) {
+  try {
+    return resolveImportPath(fromPath, importPath);
+  } catch (e) {
+    if (e instanceof ImportError) return void 0;
+    throw e;
+  }
+}
+function mapResolver(files) {
+  const paths = Object.keys(files).filter((p) => !isRemoteSpec(p));
+  return (importPath, fromPath) => {
+    const path = resolveImportPath(fromPath, importPath);
+    if (Object.prototype.hasOwnProperty.call(files, path)) return { path, source: files[path] };
+    if (isRemoteSpec(path)) return void 0;
+    const name = path.split("/").pop();
+    const sameName = paths.filter((p) => p.split("/").pop() === name);
+    return sameName.length === 1 ? { path: sameName[0], source: files[sameName[0]] } : void 0;
+  };
 }
 
 // ../frontend/src/playground/share.ts
@@ -5459,11 +5497,14 @@ var LOCK_FILE = "proschi.lock";
 var CACHE_DIR = ".proschi/cache";
 var HASH = /^[0-9a-f]{64}$/;
 var COMMIT = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
-var emptyLock = () => ({ version: 1, git: {}, https: {} });
+var emptyLock = () => ({ version: 1, git: {}, https: {}, cloud: {} });
 var gitKey = (repo, ref) => `${repo}@${ref}`;
+var cloudKey = (name, tag) => `${name}:${tag}`;
 var remoteError = {
   noLock: (spec) => new ImportError(`'${spec}' is a remote import and there is no ${LOCK_FILE}; run proschi imports sync`),
-  notLocked: (spec) => new ImportError(`'${spec}' is not in ${LOCK_FILE}; run proschi imports sync`),
+  notLocked: (spec) => spec.startsWith("cloud:") ? remoteError.cloud(spec) : new ImportError(`'${spec}' is not in ${LOCK_FILE}; run proschi imports sync`),
+  /** A cloud version that is not pinned yet (docs/design/versions-and-cloud.md). */
+  cloud: (spec) => new ImportError(`'${spec}' is a version in your Proschi account; run proschi imports sync to pin it (cloud sources need proschi login)`),
   notCached: (spec) => new ImportError(`'${spec}' is not in the import cache (${CACHE_DIR}); run proschi imports sync`),
   altered: (spec) => new ImportError(`The cached copy of '${spec}' does not match its hash in ${LOCK_FILE}; run proschi imports sync`)
 };
@@ -5480,7 +5521,8 @@ function parseLock(text) {
   const lock = emptyLock();
   const git = json.git ?? {};
   const https = json.https ?? {};
-  if (!isRecord(git) || !isRecord(https)) throw invalid('"git" and "https" must be objects');
+  const cloud = json.cloud ?? {};
+  if (!isRecord(git) || !isRecord(https) || !isRecord(cloud)) throw invalid('"git", "https" and "cloud" must be objects');
   for (const [key, entry] of Object.entries(git)) {
     const at = key.lastIndexOf("@");
     const valid = at > 0 && isRecord(entry) && typeof entry.commit === "string" && COMMIT.test(entry.commit) && isRecord(entry.files) && Object.entries(entry.files).every(([path, hash]) => typeof hash === "string" && HASH.test(hash) && isGitSpec(`git:${key.slice(0, at)}//${path}@${key.slice(at + 1)}`));
@@ -5491,7 +5533,27 @@ function parseLock(text) {
     if (typeof hash !== "string" || !HASH.test(hash) || parseRemoteSpec(url)?.kind !== "https") throw invalid(`bad https entry '${url}'`);
     lock.https[url] = hash;
   }
+  for (const [key, entry] of Object.entries(cloud)) {
+    const hash = (v) => typeof v === "string" && HASH.test(v);
+    const valid = isCanonicalSpec(`cloud:${key}`, "cloud") && isRecord(entry) && typeof entry.tag === "string" && VERSION_TAG.test(entry.tag) && entry.tag !== LATEST_TAG && Number.isSafeInteger(entry.seq) && entry.seq > 0 && hash(entry.sha256) && (entry.source === void 0 || hash(entry.source)) && isRecord(entry.files) && Object.entries(entry.files).every(([path, h2]) => hash(h2) && isCanonicalSpec(`cloud:${key}//${path}`, "cloud"));
+    if (!valid) throw invalid(`bad cloud entry '${key}'`);
+    lock.cloud[key] = {
+      tag: entry.tag,
+      seq: entry.seq,
+      sha256: entry.sha256,
+      ...entry.source === void 0 ? {} : { source: entry.source },
+      files: { ...entry.files }
+    };
+  }
   return lock;
+}
+function isCanonicalSpec(spec, kind) {
+  try {
+    const remote = parseRemoteSpec(spec);
+    return remote?.kind === kind && formatRemoteSpec(remote) === spec;
+  } catch {
+    return false;
+  }
 }
 function isGitSpec(spec) {
   try {
@@ -5504,6 +5566,10 @@ function lockedHash(lock, spec) {
   const remote = parseRemoteSpec(spec);
   if (remote?.kind === "git") return lock.git[gitKey(remote.repo, remote.ref)]?.files[remote.path];
   if (remote?.kind === "https") return lock.https[remote.url];
+  if (remote?.kind === "cloud") {
+    const entry = lock.cloud[cloudKey(remote.name, remote.tag)];
+    return remote.path === void 0 ? entry?.source : entry?.files[remote.path];
+  }
   return void 0;
 }
 

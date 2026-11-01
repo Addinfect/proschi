@@ -22,6 +22,7 @@ export type {
   SourceLoc,
 } from '../../frontend/src/dsl/types';
 export type { DiagramScenario } from '../../frontend/src/dsl/types';
+export { DIFF_SECTIONS, diffDiagrams, requirementKey, summarizeDiff, type DiagramDiff, type DiffSection, type FieldChange } from '../../frontend/src/dsl/diff';
 export { toMermaidArchitecture, toMermaidSequence } from '../../frontend/src/dsl/mermaid';
 export { buildSequence, type SequenceMessage } from '../../frontend/src/dsl/sequence';
 export { EXPORT_CSP, buildHld, toHtml as hldToHtml, toMarkdown as hldToMarkdown, type HldDocument, type HldFigures } from '../../frontend/src/hld';

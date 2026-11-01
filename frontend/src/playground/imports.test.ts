@@ -136,5 +136,7 @@ describe('team files in the browser', () => {
     expect(teamFileOf([shared, orders], shared, 'teams/orders.proschi')).toMatchObject({ source: 'title "Shared"', readOnly: expect.stringContaining('link') });
     expect(teamFileOf([shared], shared, 'git:github.com/acme/orders//team.proschi@v1')).toMatchObject({ readOnly: expect.stringContaining('remote') });
     expect(teamFileOf([org], org, 'teams/missing.proschi')).toBeUndefined();
+    // A version fetched from the account never changes.
+    expect(teamFileOf([org], org, 'cloud:orders:v1', { 'cloud:orders:v1': 'title "V1"' })).toMatchObject({ source: 'title "V1"', readOnly: expect.stringContaining('saved version') });
   });
 });

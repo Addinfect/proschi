@@ -294,7 +294,7 @@ The command line, the language server and the editor plugins resolve
 and inside the [project root](IMPORTS.md#the-project-root). System `from`
 files work the same way.
 
-`git:` and `https://` imports are read from a local cache that
+`git:`, `https://` and [`cloud:`](IMPORTS.md#cloud-sources) imports are read from a local cache that
 `proschi imports sync` fills. It is the only command that uses the network.
 Commit `proschi.lock`, add `.proschi/` to `.gitignore`, and run
 `proschi imports sync --frozen` in CI. See
@@ -310,6 +310,27 @@ Commit `proschi.lock`, add `.proschi/` to `.gitignore`, and run
   definition work across files.
 - `proschi share-link <file>` prints an editor link that carries the
   document and every file it imports.
+
+## Sign in from the command line
+
+`cloud:` imports and `proschi versions` read the diagrams saved in your
+Proschi account, so the command line needs to sign in once:
+
+```sh
+proschi login     # opens the browser to sign in with GitHub or Google
+proschi whoami    # prints the account you are signed in to
+proschi logout    # ends the sign-in and deletes the stored tokens
+```
+
+`proschi login` waits for the browser on a one-time local address
+(`http://127.0.0.1:<port>/callback`), and prints the sign-in link for a
+machine with no browser. Your password and session cookie never pass
+through the command line. The tokens are stored in
+`~/.config/proschi/credentials.json` (`%APPDATA%\proschi\` on Windows),
+readable only by you.
+
+Signed in, you can [sync `cloud:` imports](IMPORTS.md#cloud-sources) and
+[read saved versions](VERSIONS.md#6-read-versions-from-the-command-line).
 
 ## Converting Mermaid and OpenAPI
 

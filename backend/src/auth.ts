@@ -1,4 +1,4 @@
-import { appRedirect, isAppRedirectUri, isAppState, isChallenge, issueAppCode, type AppLogin } from './apptokens';
+import { appRedirect, CLI_CLIENT, isAppState, isChallenge, isRedirectUriFor, issueAppCode, type AppClient, type AppLogin } from './apptokens';
 import type { Ctx } from './context';
 import { decodeJson, encodeJson, randomToken, sha256, sign, unsign } from './crypto';
 import { now, secretOk, type Env } from './env';
@@ -25,7 +25,8 @@ import { rejectName } from './moderation';
  * instead: the callback links it and starts no new session.
  *
  * A native app starts with /start?client=app&redirect_uri=<allow-listed
- * URI>&code_challenge=<S256>: the callback sets no cookie but sends the app
+ * URI>&code_challenge=<S256> (the CLI with client=proschi-cli and a
+ * loopback redirect_uri, apptokens.ts): the callback sets no cookie but sends the app
  * back to its URI with a one-time code for POST /auth/token (apptokens.ts).
  * Requests then carry `Authorization: Bearer <access token>`.
  */
@@ -182,18 +183,22 @@ function unavailable(ctx: Ctx): Response {
 /**
  * The app part of /start?client=app: redirect_uri must be allow-listed
  * (APP_REDIRECT_URIS), code_challenge an S256 challenge; state is optional.
+ * For client=proschi-cli, redirect_uri must be a loopback one
+ * (isLoopbackRedirectUri) instead.
  */
-function readAppLogin(env: Env, params: URLSearchParams): AppLogin | string {
+function readAppLogin(env: Env, params: URLSearchParams, client: AppClient): AppLogin | string {
   const redirectUri = params.get('redirect_uri') ?? '';
-  if (!isAppRedirectUri(env, redirectUri)) return 'redirect_uri is not an allowed app redirect URI';
+  if (!isRedirectUriFor(env, client, redirectUri)) {
+    return client === CLI_CLIENT ? 'redirect_uri must be http://127.0.0.1:<port>/callback or http://[::1]:<port>/callback' : 'redirect_uri is not an allowed app redirect URI';
+  }
   const challenge = params.get('code_challenge') ?? '';
   if (params.get('code_challenge_method') !== 'S256' || !isChallenge(challenge)) return 'code_challenge must be an S256 PKCE challenge (code_challenge_method=S256)';
   const state = params.get('state');
   if (state !== null && !isAppState(state)) return 'state must be at most 256 printable ASCII characters';
-  return { redirectUri, challenge, ...(state !== null ? { state } : {}) };
+  return { ...(client === CLI_CLIENT ? { client } : {}), redirectUri, challenge, ...(state !== null ? { state } : {}) };
 }
 
-/** GET /auth/<provider>/start?return=<path>[&link=1], or ?client=app&redirect_uri=&code_challenge=&code_challenge_method=S256[&state=] */
+/** GET /auth/<provider>/start?return=<path>[&link=1], or ?client=app|proschi-cli&redirect_uri=&code_challenge=&code_challenge_method=S256[&state=] */
 export async function startLogin(request: Request, ctx: Ctx, provider: ProviderId): Promise<Response> {
   const { env } = ctx;
   if (!secretOk(env)) return unavailable(ctx);
@@ -202,13 +207,13 @@ export async function startLogin(request: Request, ctx: Ctx, provider: ProviderI
   if (!clientId || !configuredProviders(env).includes(provider)) return errorResponse(404, `Sign-in with ${provider} is not configured`);
   const url = new URL(request.url);
   const client = url.searchParams.get('client');
-  if (client !== null && client !== 'app') return errorResponse(400, 'client must be app');
-  const returnTo = client === 'app' ? '/' : (url.searchParams.get('return') ?? '/');
+  if (client !== null && client !== 'app' && client !== CLI_CLIENT) return errorResponse(400, `client must be app or ${CLI_CLIENT}`);
+  const returnTo = client !== null ? '/' : (url.searchParams.get('return') ?? '/');
   if (!isReturnPath(returnTo)) return errorResponse(400, 'return must be a path on this site');
   const login: LoginState = { provider, state: randomToken(16), verifier: randomToken(32), returnTo, expires: now() + STATE_TTL };
-  if (client === 'app') {
+  if (client !== null) {
     if (url.searchParams.has('link')) return errorResponse(400, 'An app cannot link a sign-in');
-    const app = readAppLogin(env, url.searchParams);
+    const app = readAppLogin(env, url.searchParams, client);
     // Never redirected to: an address that is not allow-listed only gets this error.
     if (typeof app === 'string') return errorResponse(400, app);
     login.app = app;
@@ -226,7 +231,7 @@ async function readLoginState(request: Request, env: Env & { SESSION_SECRET: str
   const login = value ? (decodeJson(value) as LoginState | undefined) : undefined;
   if (!login || login.provider !== provider || !(login.expires > now()) || !isReturnPath(login.returnTo)) return undefined;
   // Checked again: the allow-list may have changed since /start.
-  if (login.app && !isAppRedirectUri(env, login.app.redirectUri)) return undefined;
+  if (login.app && !isRedirectUriFor(env, login.app.client ?? 'app', login.app.redirectUri)) return undefined;
   return login;
 }
 
@@ -349,6 +354,8 @@ export interface User {
   publicProfile: boolean;
   /** Cards a day the user aims for (GOAL_CHOICES in frontend/src/learn/streak.ts); a solve also meets it. */
   dailyGoal: number;
+  /** The account's plan, for its limits (src/plans.ts). */
+  plan: string;
 }
 
 interface UserRow {
@@ -356,11 +363,12 @@ interface UserRow {
   display_name: string;
   public_profile: number;
   daily_goal: number;
+  plan: string;
   last_seen_day: string | null;
   expires_at: number;
 }
 
-const toUser = (row: UserRow): User => ({ id: row.id, displayName: row.display_name, publicProfile: row.public_profile === 1, dailyGoal: row.daily_goal });
+const toUser = (row: UserRow): User => ({ id: row.id, displayName: row.display_name, publicProfile: row.public_profile === 1, dailyGoal: row.daily_goal, plan: row.plan });
 
 /**
  * Notes today (UTC) as the account's last seen day, at most once a day and
@@ -394,7 +402,7 @@ export async function authenticate(request: Request, ctx: Ctx): Promise<User | u
     if (!bearer) return undefined;
     // Access tokens only: a refresh token or a cookie's token is refused here.
     const row = await ctx.env.DB.prepare(
-      `SELECT u.id, u.display_name, u.public_profile, u.daily_goal, u.last_seen_day, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id
+      `SELECT u.id, u.display_name, u.public_profile, u.daily_goal, u.plan, u.last_seen_day, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id
        WHERE s.token_hash = ? AND s.kind = 'app_access' AND s.expires_at > ? AND u.blocked_at IS NULL`,
     )
       .bind(await sha256(bearer), now())
@@ -409,7 +417,7 @@ export async function authenticate(request: Request, ctx: Ctx): Promise<User | u
   const hash = await sha256(token);
   const t = now();
   const row = await ctx.env.DB.prepare(
-    `SELECT u.id, u.display_name, u.public_profile, u.daily_goal, u.last_seen_day, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id
+    `SELECT u.id, u.display_name, u.public_profile, u.daily_goal, u.plan, u.last_seen_day, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = ? AND s.kind = 'web' AND s.expires_at > ? AND u.blocked_at IS NULL`,
   )
     .bind(hash, t)

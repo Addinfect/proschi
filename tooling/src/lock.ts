@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'node:path';
 import { CACHE_DIR, HASH, LOCK_FILE, parseLock, remoteError, type Lock } from './lockFormat';
 
-export { CACHE_DIR, LOCK_FILE, emptyLock, gitKey, lockedHash, parseLock, remoteError, type GitLock, type Lock } from './lockFormat';
+export { CACHE_DIR, LOCK_FILE, cloudKey, emptyLock, gitKey, lockedHash, parseLock, remoteError, type CloudLock, type GitLock, type Lock } from './lockFormat';
 
 export const sha256 = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
 
@@ -22,9 +22,16 @@ export function readLock(root: string): Lock | undefined {
 
 const sorted = <T>(o: Record<string, T>, map: (v: T) => unknown = (v) => v) => Object.fromEntries(Object.keys(o).sort().map((k) => [k, map(o[k])]));
 
-/** The lockfile's text: keys sorted, so it diffs well and the same imports always give the same file. */
+/**
+ * The lockfile's text: keys sorted, so it diffs well and the same imports
+ * always give the same file. `cloud` is left out when empty, so lockfiles
+ * without cloud imports stay as they were.
+ */
 export function formatLock(lock: Lock): string {
-  return JSON.stringify({ version: 1, git: sorted(lock.git, (e) => ({ commit: e.commit, files: sorted(e.files) })), https: sorted(lock.https) }, null, 2) + '\n';
+  const cloud = Object.keys(lock.cloud).length
+    ? { cloud: sorted(lock.cloud, (e) => ({ tag: e.tag, seq: e.seq, sha256: e.sha256, ...(e.source ? { source: e.source } : {}), files: sorted(e.files) })) }
+    : {};
+  return JSON.stringify({ version: 1, git: sorted(lock.git, (e) => ({ commit: e.commit, files: sorted(e.files) })), https: sorted(lock.https), ...cloud }, null, 2) + '\n';
 }
 
 export function writeLock(root: string, lock: Lock): void {

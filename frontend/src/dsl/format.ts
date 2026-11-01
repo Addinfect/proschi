@@ -1,4 +1,4 @@
-import { BracketCounter, stripTrailingComment, tokenizeLine, type Token } from './lexer';
+import { BracketCounter, qualify, stripTrailingComment, tokenizeLine, type Token } from './lexer';
 
 /**
  * The canonical layout of a Proschi document: two spaces per open block,
@@ -125,7 +125,9 @@ function classify(lines: string[]): Entry[] {
       continue;
     }
 
-    const { tokens, diagnostics } = tokenizeLine(raw, i + 1);
+    // `orders.api` by an arrow is one id to the parser, so it is one token here and stays tight.
+    const { tokens: lexed, diagnostics } = tokenizeLine(raw, i + 1);
+    const tokens = qualify(lexed);
     // Lines the lexer cannot read are skipped by the parser; keep them as written.
     if (diagnostics.some((d) => d.severity === 'error') || tokens.length === 0) {
       entries.push({ kind: 'line', depth, text: original });
@@ -330,7 +332,8 @@ function join(raw: string, tokens: Token[]): string {
 
 /** True when the rewritten line lexes to exactly the original tokens. */
 function sameTokens(text: string, tokens: Token[]): boolean {
-  const { tokens: again, diagnostics } = tokenizeLine(text, 1);
+  const { tokens: lexed, diagnostics } = tokenizeLine(text, 1);
+  const again = qualify(lexed);
   return diagnostics.length === 0 && again.length === tokens.length && again.every((t, i) => t.kind === tokens[i].kind && t.value === tokens[i].value);
 }
 

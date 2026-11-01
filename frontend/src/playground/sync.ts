@@ -1,4 +1,4 @@
-import { BLANK_SOURCE, defaultClock, defaultIds, fileNameOf, titleOf, type DocumentState, type SavedDiagram } from './documents';
+import { BLANK_SOURCE, defaultClock, defaultIds, fileNameOf, storedImports, titleOf, type DocumentState, type SavedDiagram } from './documents';
 import { fileMap, isRecord, isSafeKey } from './sanitize';
 
 /**
@@ -138,7 +138,7 @@ export const remoteFingerprint = (doc: RemoteDoc): string => contentFingerprint(
 
 /** The server's copy as a diagram in this browser. */
 export function toLocal(doc: RemoteDoc): SavedDiagram {
-  const imports = fileMap(doc.imports);
+  const imports = storedImports(fileMap(doc.imports));
   return { id: doc.id, source: doc.source, fileName: doc.name, updatedAt: new Date(doc.updatedAt).toISOString(), ...(imports ? { imports } : {}) };
 }
 

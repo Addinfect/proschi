@@ -10,6 +10,7 @@ import { rejectName } from './moderation';
 import { findProblem, problemIds, verify, type Verdict } from './verify';
 import { exportGame } from './game';
 import { exportDocuments } from './documents';
+import { exportVersions } from './versions';
 import { clientDay as runDay, utcDay } from './activity';
 import { exportShares } from './shares';
 import { exportEmailPrefs } from './reminders';
@@ -117,7 +118,7 @@ export async function updateMe(request: Request, ctx: Ctx): Promise<Response> {
   return json({ user: { id: user.id, displayName, publicProfile, dailyGoal } }, 200, NO_STORE);
 }
 
-/** DELETE /api/me: the account, its identities, sessions (apps' tokens and sign-in codes too), progress, lessons read, card reviews, achievements, daily challenge attempts, game progress, short links, synced diagrams and the email reminders' address (ON DELETE CASCADE). */
+/** DELETE /api/me: the account, its identities, sessions (apps' tokens and sign-in codes too), progress, lessons read, card reviews, achievements, daily challenge attempts, game progress, short links, synced diagrams and their versions and the email reminders' address (ON DELETE CASCADE). */
 export async function deleteMe(request: Request, ctx: Ctx): Promise<Response> {
   const user = await requireUser(request, ctx);
   await ctx.env.DB.prepare('DELETE FROM users WHERE id = ?').bind(user.id).run();
@@ -134,7 +135,7 @@ export async function exportMe(request: Request, ctx: Ctx): Promise<Response> {
   const user = await requireUser(request, ctx);
   await rateLimit(ctx.env.PROFILE_LIMITER, user.id, 'Too many account changes; wait a minute');
   const [account, identities, sessions, progress, cardReviews, cardStates, achievements, challenges] = await DB.batch([
-    DB.prepare('SELECT created_at, daily_goal, last_seen_day FROM users WHERE id = ?').bind(user.id),
+    DB.prepare('SELECT created_at, daily_goal, last_seen_day, plan FROM users WHERE id = ?').bind(user.id),
     DB.prepare('SELECT provider, subject FROM identities WHERE user_id = ? ORDER BY provider').bind(user.id),
     DB.prepare('SELECT kind, created_at, expires_at, used_at FROM sessions WHERE user_id = ? ORDER BY created_at, rowid').bind(user.id),
     DB.prepare(
@@ -158,6 +159,7 @@ export async function exportMe(request: Request, ctx: Ctx): Promise<Response> {
       dailyGoal: (account.results[0] as Row).daily_goal,
       createdAt: (account.results[0] as Row).created_at,
       lastSeenDay: (account.results[0] as Row).last_seen_day,
+      plan: (account.results[0] as Row).plan,
     },
     identities: (identities.results as Row[]).map((r) => ({ provider: r.provider, subject: r.subject })),
     // kind: web (the site's cookie), app_access or app_refresh (an app's tokens; rotatedAt once a refresh token was used).
@@ -225,6 +227,8 @@ export async function exportMe(request: Request, ctx: Ctx): Promise<Response> {
     shares: await exportShares(DB, user.id, new URL(request.url).origin),
     // The editor's diagrams kept by cloud sync, with tombstones of deleted ones (kept 30 days).
     documents: await exportDocuments(DB, user.id),
+    // Their tagged versions, with content; deleted ones as tombstones (tag and seq kept, content cleared).
+    documentVersions: await exportVersions(DB, user.id),
     // Email reminders: the address and its settings; null without one.
     emailReminders: await exportEmailPrefs(DB, user.id),
   };

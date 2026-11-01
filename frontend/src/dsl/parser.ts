@@ -1,6 +1,6 @@
 import type { ComponentType, TechName, TechStack } from '../types/canvas';
 import { findTech, suggestTech } from '../catalog/componentCatalog';
-import { BracketCounter, tokenizeLine, type Token } from './lexer';
+import { BracketCounter, qualify, tokenizeLine, type Token } from './lexer';
 import { endpointGroupKey } from './paths';
 import { DATA_STORE_KINDS, KINDS, TYPE_OF_KIND, isDataStore, isKind, kindFromName, kindOf } from './kinds';
 import { parseQuantity } from './quantity';
@@ -2451,24 +2451,6 @@ interface StyleParts {
   color?: { name: string; hex: string };
   tag?: { value: string; loc: SourceLoc };
   critical?: boolean;
-}
-
-/**
- * Joins `orders` and `.api` written without a space into one id, `orders.api`,
- * where a connection or step names a node: before or after its arrow.
- */
-function qualify(tokens: Token[]): Token[] {
-  let out: Token[] | undefined;
-  for (let i = 0; i < tokens.length; i++) {
-    const [t, next] = [tokens[i], tokens[i + 1]];
-    const joined = t.kind === 'ident' && next?.kind === 'tag' && next.col === t.col + t.length;
-    if (joined && (tokens[i + 2]?.kind === 'arrow' || tokens[i - 1]?.kind === 'arrow')) {
-      out ??= tokens.slice(0, i);
-      out.push({ ...t, value: `${t.value}.${next.value}`, length: t.length + next.length });
-      i++;
-    } else out?.push(t);
-  }
-  return out ?? tokens;
 }
 
 /** A use case of `diagram` by name (exact, then ignoring case) or id, like the simulation finds them. */

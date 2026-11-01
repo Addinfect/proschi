@@ -60,7 +60,8 @@ describe('docs/site.json', () => {
     expect(pager('quickstart')).toContain(`rel="next"><span class="pager__dir">Next</span><span class="pager__title">${title('why')}</span>`)
     expect(pager('why')).toContain(`rel="next"><span class="pager__dir">Next</span><span class="pager__title">${title(sidebar[3])}</span>`)
     expect(pager('systems')).toContain(`<span class="pager__title">${title('imports')}</span>`)
-    expect(pager('systems')).toContain(`<span class="pager__title">${title('hld')}</span>`)
+    expect(pager('systems')).toContain(`<span class="pager__title">${title('versions')}</span>`)
+    expect(pager('versions')).toContain(`<span class="pager__title">${title('hld')}</span>`)
     expect(pager('grammar')).toContain(`<span class="pager__title">${title('model')}</span>`)
   })
 

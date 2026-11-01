@@ -118,19 +118,23 @@ above are about events, not about you).
 
 - Your account: the sign-in provider and the user id it gives Proschi, a
   display name (your GitHub login or Google first name, which you can
-  change), whether you chose to appear on the leaderboard, and when the
-  account was created.
+  change), whether you chose to appear on the leaderboard, when the
+  account was created, and its plan (everyone is on the free plan; it only
+  sets how much the account may keep).
 - Sessions: a hash of each session's cookie, with when it started and when
   it expires. A session lasts 30 days and renews while you use it; expired
   ones are deleted daily.
-- If you sign in to a Proschi app on a phone: a hash of each of its tokens
+- If you sign in to a Proschi app on a phone, or to the `proschi` command
+  line tool: a hash of each of its tokens
   (an access token that lasts an hour and a refresh token that lasts 60
   days), with whether it is the site's cookie or which app token it is, when
   it was issued, when it expires and, for a refresh token, when it was
   exchanged for new ones. Rotated refresh tokens are kept until they expire,
   to notice a stolen copy being used. During sign-in a hash of a one-time
   code, which the app exchanges for its tokens within 60 seconds, is kept
-  with the app's address to return to. Expired ones are deleted daily.
+  with the app's address to return to (for the command line tool, the
+  local `http://127.0.0.1:<port>/callback` address it listens on). Expired
+  ones are deleted daily.
 - Practice progress, per problem: how many times you ran the tests, your
   latest design, when you first ran and last ran it, when you solved it and
   in how many runs and on which local date, the cost and p99 of your best
@@ -168,8 +172,7 @@ above are about events, not about you).
   profile or a leaderboard, and only you can read them. Deleting a diagram
   leaves a marker (its id, version and when) for 30 days, so your other
   devices delete their copy too; its text is removed at once. Your account
-  keeps at most 5 diagrams for now (a paid plan will raise that), 64 KiB
-  each; the others stay in your browser only, marked "This browser only" in
+  keeps at most 5 diagrams on the free plan, 64 KiB each; the others stay in your browser only, marked "This browser only" in
   the Diagrams menu, and are never lost. **Move to this browser only** in
   that menu takes a diagram out of your account (and your other devices) to
   free a slot. Turning sync off keeps the copies in your account until you
@@ -186,6 +189,17 @@ above are about events, not about you).
   the choice: **Sign out** keeps the synced diagrams in this browser (the
   default, as before), **Sign out and remove synced diagrams from this
   browser** removes them (edits not yet saved to your account stay).
+- Versions of your synced diagrams, each one you tag (from the editor or
+  the command line tool): a copy of the diagram's file name, text and
+  imported files as your account had them then, the tag you chose (such as
+  `2026-11-01`), an optional note, when you made it, its size and a
+  fingerprint (SHA-256) of its content. A version never changes. Like your
+  diagrams they are private: only you can read them, and `cloud:` references
+  to them resolve only in your own account. Up to 20 per diagram on the free
+  plan. Deleting a version removes its copy, note and fingerprint at once and
+  keeps only its tag, number and dates, so the tag isn't reused; deleting the
+  diagram (or every cloud copy, or the account) deletes all its versions,
+  tags included, at once.
 - Short links, each one you make with Share → Short link with preview (or
   Share → Embed, signed in): the diagram's text and the files it imports,
   its title, a PNG preview of the diagram that your browser rendered (none
@@ -272,7 +286,8 @@ reminders' address is shown masked (`a***@example.com`), and session tokens
 exist only as hashes. The panel shows aggregates (accounts, sign-ups, the
 usage counts) and, per account, the display name, sign-in providers and
 their user ids, when it joined and was last active (a date), its progress
-and counts, and its short links, but not your diagrams' or designs' text.
+and counts (diagrams and versions too), its plan, and its short links, but
+not your diagrams', versions' or designs' text.
 
 The operator can **block** an account that breaks the rules (spam in short
 links, an abusive name): it is signed out everywhere, cannot sign in again
@@ -340,21 +355,23 @@ reminder run hold your user id, never the address, when a send fails.
 In Settings on the practice page (`#/me`, from the account menu):
 
 - **Download my data** saves everything stored about you as JSON, your
-  synced diagrams included, every session with its kind (the site or an
+  synced diagrams and their versions included, every session with its kind (the site or an
   app) but never the token hashes; short links come with their diagrams and
   the address of each preview, and email reminders with their address and
   settings (the unsubscribe secret stays out).
 - **Delete my cloud copies**, in the editor's Diagrams menu once cloud sync
-  is off, removes every diagram from your account; those in your browser
-  stay.
+  is off, removes every diagram from your account, their versions with
+  them; those in your browser stay. A single version can be deleted on its
+  own.
 - **Delete account** removes your account, sessions (apps' too), progress, card
   reviews, daily challenge results, badges, game progress, short links,
-  synced diagrams and the email reminders' address from the server at once;
+  synced diagrams and their versions, and the email reminders' address from the server at once;
   the progress and diagrams in your browser stay.
   The database's point-in-time recovery history (Cloudflare D1 Time Travel)
   still holds them for up to 30 days, after which they are gone.
 - **Sign out everywhere** ends every session, on every device, signed-in
-  apps included.
+  apps and the command line tool included (signing out of the command line
+  tool ends just its own).
 
 The server is the open source [backend](../backend/README.md), so all of
 this can be checked in the code. Questions go to

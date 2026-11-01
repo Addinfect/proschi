@@ -59,11 +59,13 @@ export interface TeamFile {
 /**
  * The file at `path` that `current`'s imports read: editable when it is a
  * diagram saved in this browser; read-only when it came with the share link
- * `current` was opened from, or from a remote source (bundled, never fetched).
+ * `current` was opened from, or from a remote source (bundled, never fetched),
+ * or a saved version (`cloud:`, in `cloudFiles` when fetched from the account).
  */
-export function teamFileOf(docs: SavedDiagram[], current: SavedDiagram, path: string): TeamFile | undefined {
-  const source = importableFiles(docs, current)[path];
+export function teamFileOf(docs: SavedDiagram[], current: SavedDiagram, path: string, cloudFiles: Record<string, string> = {}): TeamFile | undefined {
+  const source = { ...importableFiles(docs, current), ...cloudFiles }[path];
   if (source === undefined) return undefined;
+  if (path.startsWith('cloud:')) return { path, source, readOnly: 'It is a saved version, which never changes; edit the diagram itself and save a new version.' };
   if (/^(git:|https?:)/.test(path)) return { path, source, readOnly: 'It comes from a remote source; change it in its repository.' };
   if (current.imports?.[path] !== undefined) return { path, source, readOnly: 'It came with the link this diagram was opened from.' };
   // The most recently changed one, the one imports read (importableFiles).

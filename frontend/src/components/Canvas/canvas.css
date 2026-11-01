@@ -159,6 +159,38 @@
   color: rgb(var(--c-on-accent));
 }
 
+/* Compare (Playground/VersionViewer): what the target added or changed since the base, with a word for those who cannot tell the colors apart. */
+.react-flow__node.pc-diff-added .pc-node {
+  border-color: rgb(var(--c-pass));
+  box-shadow: 4px 4px 0 rgb(var(--c-pass) / 0.55);
+}
+.react-flow__node.pc-diff-changed .pc-node {
+  border-color: rgb(var(--c-blue));
+  box-shadow: 4px 4px 0 rgb(var(--c-blue) / 0.55);
+}
+.react-flow__node.pc-diff-same {
+  opacity: 0.5;
+}
+.react-flow__node:is(.pc-diff-added, .pc-diff-changed) .pc-node::after {
+  position: absolute;
+  top: -9px;
+  right: 10px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font: 700 10px/16px var(--font-mono, ui-monospace, monospace);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgb(var(--c-on-accent));
+}
+.react-flow__node.pc-diff-added .pc-node::after {
+  content: 'new';
+  background: rgb(var(--c-pass));
+}
+.react-flow__node.pc-diff-changed .pc-node::after {
+  content: 'changed';
+  background: rgb(var(--c-blue));
+}
+
 /* ---------- simulation overlay (sim/overlay.ts): heat, replicas, load ---------- */
 
 .pc-node[data-stack='1'] {

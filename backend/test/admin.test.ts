@@ -246,7 +246,7 @@ describe('admin: users', () => {
     await env.DB.prepare("INSERT INTO shares (id, user_id, title, source, created_at) VALUES ('AbCdEf1234', ?, 'Shop', 'a', 5)").bind(ada.id).run();
     const detail = (await (await adminCall(`/api/admin/users/${ada.id}`, admin)).json()) as Record<string, unknown>;
     expect(detail).toMatchObject({
-      user: { id: ada.id, displayName: 'Ada', blockedAt: null },
+      user: { id: ada.id, displayName: 'Ada', blockedAt: null, plan: 'free' },
       identities: [{ provider: 'github', subject: ada.id }],
       sessions: [{ kind: 'web', count: 1 }],
       shares: [{ id: 'AbCdEf1234', title: 'Shop' }],

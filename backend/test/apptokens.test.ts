@@ -430,3 +430,105 @@ describe('timingSafeEqual', () => {
     expect(timingSafeEqual('', '')).toBe(true);
   });
 });
+
+describe('CLI sign-in (proschi-cli, loopback redirect)', () => {
+  beforeEach(resetDatabase);
+  afterEach(() => vi.restoreAllMocks());
+
+  const cliStart = (redirectUri: string, challenge: string, extra: Record<string, string> = {}) =>
+    call(startPath({ client: 'proschi-cli', redirect_uri: redirectUri, code_challenge: challenge, code_challenge_method: 'S256', ...extra }), { redirect: 'manual' });
+
+  /** The CLI's sign-in up to the redirect back to its loopback server: the one-time code. */
+  async function cliCode(uri: string, challenge: string, state?: string): Promise<{ location: string; code: string; back: Response }> {
+    const start = await cliStart(uri, challenge, state ? { state } : {});
+    expect(start.status, uri).toBe(302);
+    const cookie = (start.headers.getSetCookie().find((c) => c.startsWith('proschi_oauth=')) ?? '').split(';')[0];
+    const providerState = new URL(start.headers.get('Location')!).searchParams.get('state')!;
+    const back = await call(`/auth/github/callback?${new URLSearchParams({ code: 'good-code', state: providerState })}`, { redirect: 'manual', headers: { Cookie: cookie } });
+    const location = back.headers.get('Location') ?? '';
+    return { location, back, code: new URL(location, 'https://invalid.example').searchParams.get('code') ?? '' };
+  }
+
+  it('accepts 127.0.0.1 and [::1] on any port', async () => {
+    mockGitHub();
+    for (const uri of ['http://127.0.0.1:53682/callback', 'http://[::1]:1/callback', 'http://127.0.0.1:65535/callback']) {
+      const { verifier, challenge } = await pkce();
+      const { location, back, code } = await cliCode(uri, challenge, 'cli-state');
+      expect(location).toMatch(new RegExp(`^${uri.replace(/[.[\]]/g, '\\$&')}\\?code=[\\w-]{43}&state=cli-state$`));
+      expect(back.headers.getSetCookie().some((c) => c.startsWith(`${SESSION_COOKIE}=`))).toBe(false);
+      // The redirect_uri, when sent, must be the one the code was issued for (and the code is then used up).
+      expect((await tokenRequest({ grant_type: 'authorization_code', code, code_verifier: verifier, redirect_uri: 'http://127.0.0.1:1234/callback' })).status).toBe(400);
+    }
+  });
+
+  it('runs the whole flow: tokens, the API, refresh and revoke', async () => {
+    mockGitHub();
+    const { verifier, challenge } = await pkce();
+    const uri = 'http://127.0.0.1:49152/callback';
+    const { code } = await cliCode(uri, challenge);
+    const response = await tokenRequest({ grant_type: 'authorization_code', code, code_verifier: verifier, redirect_uri: uri });
+    expect(response.status).toBe(200);
+    const tokens = (await response.json()) as Tokens;
+    expect(tokens).toMatchObject({ token_type: 'Bearer', expires_in: ACCESS_TTL });
+    expect((await me(tokens.access_token)).status).toBe(200);
+    const refreshed = (await (await refresh(tokens.refresh_token)).json()) as Tokens;
+    expect((await me(tokens.access_token)).status).toBe(401);
+    expect((await me(refreshed.access_token)).status).toBe(200);
+    expect((await call('/auth/revoke', { method: 'POST', body: { token: refreshed.refresh_token } })).status).toBe(200);
+    expect((await me(refreshed.access_token)).status).toBe(401);
+  });
+
+  it('refuses every other redirect URI, without redirecting', async () => {
+    const { challenge } = await pkce();
+    for (const uri of [
+      'http://evil.com/callback',
+      'http://evil.com:8080/callback',
+      'http://127.0.0.1.evil.com:8080/callback',
+      'http://127.0.0.1.evil.com/callback',
+      'http://127.0.0.1:8080.evil.com/callback',
+      'http://127.0.0.1@evil.com:8080/callback',
+      'http://user@127.0.0.1:8080/callback',
+      'http://localhost:8080/callback',
+      'https://127.0.0.1:8080/callback',
+      'http://127.0.0.1/callback',
+      'http://127.0.0.1:/callback',
+      'http://127.0.0.1:0/callback',
+      'http://127.0.0.1:08080/callback',
+      'http://127.0.0.1:65536/callback',
+      'http://127.0.0.1:8080/callback/',
+      'http://127.0.0.1:8080/callback?x=1',
+      'http://127.0.0.1:8080/callback#x',
+      'http://127.0.0.1:8080/other',
+      'http://127.0.0.1:8080/Callback',
+      'http://127.0.0.2:8080/callback',
+      'http://[::2]:8080/callback',
+      'http://[0:0:0:0:0:0:0:1]:8080/callback',
+      'http://0x7f.0.0.1:8080/callback',
+      ' http://127.0.0.1:8080/callback',
+      'proschi://auth',
+      '',
+    ]) {
+      const response = await cliStart(uri, challenge);
+      expect(response.status, uri).toBe(400);
+      expect(response.headers.get('Location'), uri).toBeNull();
+    }
+  });
+
+  it('requires PKCE S256 and refuses linking', async () => {
+    const uri = 'http://127.0.0.1:8080/callback';
+    const { challenge } = await pkce();
+    expect((await cliStart(uri, challenge, { code_challenge_method: 'plain' })).status).toBe(400);
+    expect((await cliStart(uri, 'short')).status).toBe(400);
+    expect((await call(startPath({ client: 'proschi-cli', redirect_uri: uri }), { redirect: 'manual' })).status).toBe(400);
+    expect((await cliStart(uri, challenge, { link: '1' })).status).toBe(400);
+    expect((await cliStart(uri, challenge)).status).toBe(302);
+  });
+
+  it('keeps loopback URIs to the CLI, and the allow-list to apps', async () => {
+    const { challenge } = await pkce();
+    const loopback = 'http://127.0.0.1:8080/callback';
+    expect((await call(startPath({ client: 'app', redirect_uri: loopback, code_challenge: challenge, code_challenge_method: 'S256' }), { redirect: 'manual' })).status).toBe(400);
+    expect((await cliStart(APP_URI, challenge)).status).toBe(400);
+    expect((await call(startPath({ client: 'other-cli', redirect_uri: loopback, code_challenge: challenge, code_challenge_method: 'S256' }), { redirect: 'manual' })).status).toBe(400);
+  });
+});

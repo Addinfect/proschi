@@ -157,6 +157,17 @@ test.describe('team systems in the editor', () => {
     }
   });
 
+  test('Format code keeps the references to entry points whole', async ({ page }) => {
+    await page.getByRole('button', { name: 'Diagrams' }).click();
+    await page.getByRole('menuitem', { name: /Format code/ }).click();
+    // The connections line up, so the document did change.
+    await expect.poll(() => editorText(page)).toContain('\nshopper  -> frontend.web    : HTTPS\n');
+    const text = await editorText(page);
+    expect(text).toContain('\nfrontend -> orders.api      : place order\n');
+    expect(text).not.toMatch(/ \.(web|api|stock|charge|events)\b/);
+    await expect(status(page, 'Order Processing')).toHaveText('OK');
+  });
+
   test('a box expands in place and collapses again', async ({ page }) => {
     const before = await editorText(page);
     await box(page, 'Order Processing').getByRole('button', { name: 'Expand Order Processing', exact: true }).click();

@@ -10,7 +10,7 @@ import { getChallengeLeaderboard, getChallengeToday, postChallengeAttempt, postC
 import { configuredProviders, finishLogin, isProvider, logout, revokeAllSessions, startLogin, unlinkIdentity } from './auth';
 import { createContext, type Ctx } from './context';
 import { hourlyCron } from './cron';
-import { deleteAllDocuments, deleteDocument, listDocuments, putDocument } from './documents';
+import { deleteAllDocuments, deleteDocument, getLimits, listDocuments, putDocument } from './documents';
 import { recordThrottled, routeOf } from './events';
 import { getMetricsSummary, postMetrics } from './metrics';
 import type { Env } from './env';
@@ -24,6 +24,7 @@ import { getPublicProfile } from './profile';
 import { servePublicProfile } from './profilePage';
 import { createShare, deleteShare, getShare, listShares, oembed, shareImage, sharePage } from './shares';
 import { getLeaderboard, getProblemLeaderboard, getProblemStats, getStats } from './stats';
+import { createVersion, deleteVersion, getVersion, listVersions, resolveVersion } from './versions';
 
 /**
  * proschi.app: the site (frontend/dist, served as static assets without
@@ -57,6 +58,12 @@ import { getLeaderboard, getProblemLeaderboard, getProblemStats, getStats } from
  *   PUT    /api/me/documents/<id> {name, source, imports?, baseVersion}   saves one (409 {document} when it changed since)
  *   DELETE /api/me/documents/<id>?baseVersion=   leaves a tombstone (409 {document} when it changed since)
  *   DELETE /api/me/documents                 every synced diagram of the account
+ *   POST   /api/me/documents/<id>/versions {tag, note?, documentVersion}   tags an immutable version (409 stale|tag_taken|version_limit)
+ *   GET    /api/me/documents/<id>/versions   its versions, newest first
+ *   GET    /api/me/documents/<id>/versions/<tag|latest>   one, with its content
+ *   DELETE /api/me/documents/<id>/versions/<tag>   deletes one (its tag stays taken)
+ *   GET    /api/me/versions/resolve?name=&tag=   a cloud reference by diagram name and tag (409 ambiguous_name)
+ *   GET    /api/me/limits                   the account's plan, its limits and what it uses
  *   POST   /api/me/sessions/revoke-all      sign out everywhere
  *   DELETE /api/me/identities/<provider>    unlink a sign-in
  *   POST   /api/problems/<id>/runs {source, solved, imported?, day?}
@@ -133,6 +140,12 @@ async function route(request: Request, ctx: Ctx, pathname: string): Promise<Resp
   if (is('POST', 'api', 'me', 'achievements', 'seen')) return markAchievementsSeen(request, ctx);
   if (is('GET', 'api', 'me', 'documents')) return listDocuments(request, ctx);
   if (is('DELETE', 'api', 'me', 'documents')) return deleteAllDocuments(request, ctx);
+  if (is('GET', 'api', 'me', 'limits')) return getLimits(request, ctx);
+  if (is('POST', 'api', 'me', 'documents', '*', 'versions')) return createVersion(request, ctx, parts[3]);
+  if (is('GET', 'api', 'me', 'documents', '*', 'versions')) return listVersions(request, ctx, parts[3]);
+  if (is('GET', 'api', 'me', 'documents', '*', 'versions', '*')) return getVersion(request, ctx, parts[3], parts[5]);
+  if (is('DELETE', 'api', 'me', 'documents', '*', 'versions', '*')) return deleteVersion(request, ctx, parts[3], parts[5]);
+  if (is('GET', 'api', 'me', 'versions', 'resolve')) return resolveVersion(request, ctx);
   if (is('PUT', 'api', 'me', 'documents', '*')) return putDocument(request, ctx, parts[3]);
   if (is('DELETE', 'api', 'me', 'documents', '*')) return deleteDocument(request, ctx, parts[3]);
   if (is('POST', 'api', 'me', 'sessions', 'revoke-all')) return revokeAllSessions(request, ctx);

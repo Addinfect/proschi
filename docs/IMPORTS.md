@@ -92,6 +92,50 @@ import "https://example.com/diagrams/shared.proschi"
   ref, or the same origin, and may not leave it.
 - The web editor never fetches. A remote file reaches the browser only
   inside a link made by [`proschi share-link`](EDITORS.md#imports).
+  `cloud:` sources are the one exception (below).
+
+## Cloud sources
+
+A `cloud:` source names a [saved version](VERSIONS.md) of a diagram in your
+own Proschi account:
+
+```proschi fragment
+import "cloud:shared-infra"
+system orders "Order Processing" @Orders {
+  from "cloud:orders:2026-11-01"
+  expose api -> "Place order"
+}
+```
+
+- The form is `cloud:<name>:<tag>`. `cloud:<name>` means
+  `cloud:<name>:latest`, the newest version saved. `latest` never reads the
+  unsaved draft.
+- `<name>` is the diagram's file name in your account, with or without
+  `.proschi`: letters, digits, `.`, `_`, `+`, `-` and `/`, no spaces. To
+  reference a diagram whose name has a space, rename it first.
+- A relative import inside a version reads the files saved with it.
+- A `cloud:` source only looks in the account you are signed in to. A
+  `cloud:` import inside a `git:` or `https://` file is an error, because a
+  shared file names no account.
+
+**In the web editor**, signed in, the editor fetches each version the
+diagram needs from proschi.app before it draws. Signed out, the import is
+unresolved and says to sign in. A share link carries the fetched versions,
+so the person who opens it needs no account.
+
+**On the command line**, sign in once with
+[`proschi login`](EDITORS.md#sign-in-from-the-command-line), then run
+`proschi imports sync`. It pins each `cloud:` source in `proschi.lock` to the
+version's tag and sha256. `cloud:orders` (latest) is pinned to the tag it
+resolved to and stays there. To pick up a newer version:
+
+```sh
+proschi imports sync --update                 # every cloud:<name> (latest) import
+proschi imports sync --update cloud:orders    # only this one
+```
+
+`--update` prints each old and new tag. A source with a concrete tag never
+moves.
 
 ## Syncing remote imports
 
@@ -130,6 +174,10 @@ no credentials in URLs), it guarantees:
 - **Git runs locked down**: a shallow fetch into a temporary bare
   repository, no checkout, hooks, submodules or `ext::` transport, and only
   regular files are read.
+- **`cloud:` reads your own account only.** The web editor's one fetch
+  goes to proschi.app with your session and returns only your data, so a
+  diagram cannot make the browser contact any other host. A tagged version
+  never changes, and its sha256 is checked against what arrives.
 
 One gap: the Claude Code plugin cannot resolve symlinks, so it follows a
 symlink in the project that points outside it. `proschi check` reports it.
@@ -145,6 +193,7 @@ symlink in the project that points outside it. `proschi check` reports it.
 | `… does not match its sha256 in proschi.lock` | Find out why it changed. If expected, delete its entry and sync again. |
 | `proschi.lock is out of date` | From `--frozen`: sync locally and commit `proschi.lock`. |
 | `git fetch failed` | Check that `git` reaches the repository and the ref exists. |
+| `… is a version in your Proschi account; run proschi imports sync` | Run `proschi login` once, then `proschi imports sync`. |
 
 ## Go further
 

@@ -137,6 +137,7 @@ function UserDetailView({ id, onBack, onSignedOut }: { id: string; onBack: () =>
         <p className="adm-muted adm-mono">{user.id}</p>
         <div className="adm-badges">
           {blocked && <span className="ps-badge ps-badge--fail">blocked {formatDate(user.blockedAt)}</span>}
+          <span className="ps-badge ps-badge--neutral">{user.plan} plan</span>
           {user.publicProfile ? <span className="ps-badge ps-badge--blue">public profile</span> : <span className="ps-badge ps-badge--neutral">private profile</span>}
           {data.identities.map((i) => (
             <span key={i.provider} className="ps-badge ps-badge--neutral" title={`${i.provider} user id ${i.subject}`}>

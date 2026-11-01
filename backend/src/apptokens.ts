@@ -26,8 +26,14 @@ export const APP_CODE_TTL = 60;
 export const ACCESS_TTL = 3600;
 export const REFRESH_TTL = 60 * 24 * 3600;
 
-/** What /start?client=app asked for, kept in the signed state cookie until the callback. */
+/** The public native client of the `proschi` CLI (RFC 8252): loopback redirect URIs on any port, no allow-list. */
+export const CLI_CLIENT = 'proschi-cli';
+export type AppClient = 'app' | typeof CLI_CLIENT;
+
+/** What /start?client=app (or client=proschi-cli) asked for, kept in the signed state cookie until the callback. */
 export interface AppLogin {
+  /** The CLI's sign-in; absent for an app's (and in state cookies from before the CLI client). */
+  client?: typeof CLI_CLIENT;
   redirectUri: string;
   /** base64url SHA-256 of the app's code_verifier. */
   challenge: string;
@@ -48,6 +54,25 @@ export function appRedirectUris(env: Env): string[] {
 /** Whether `uri` is exactly one of APP_REDIRECT_URIS. Nothing else is ever redirected to. */
 export function isAppRedirectUri(env: Env, uri: string): boolean {
   return appRedirectUris(env).includes(uri);
+}
+
+/**
+ * The CLI's redirect URIs (RFC 8252 7.3): `http://127.0.0.1:<port>/callback`
+ * or `http://[::1]:<port>/callback`, the port any from 1 to 65535 (no
+ * leading zero), the host and path exact: no `localhost`, query, fragment,
+ * userinfo or trailing slash. Matched on the string as sent, never a parsed
+ * and normalised URL.
+ */
+const LOOPBACK = /^http:\/\/(?:127\.0\.0\.1|\[::1\]):([1-9][0-9]{0,4})\/callback$/;
+
+export function isLoopbackRedirectUri(uri: string): boolean {
+  const port = LOOPBACK.exec(uri)?.[1];
+  return port !== undefined && Number(port) <= 65535;
+}
+
+/** Whether `client` may be sent back to `uri`: a loopback URI for the CLI, one of APP_REDIRECT_URIS exactly for an app. */
+export function isRedirectUriFor(env: Env, client: AppClient, uri: string): boolean {
+  return client === CLI_CLIENT ? isLoopbackRedirectUri(uri) : isAppRedirectUri(env, uri);
 }
 
 /** `uri` (allow-listed) with `params` added to its query. */
