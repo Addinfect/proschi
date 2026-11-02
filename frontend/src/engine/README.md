@@ -45,6 +45,21 @@ leaving it off allows a cycle (usage, calls, transitions). `maxIn: 1` is what
 makes a relation a tree (composition, inheritance of a single parent). One graph
 therefore reads as several structures at once, chosen by `WalkOptions.relations`.
 
+## Attribute kinds are `typeof` tags
+
+The `AttributeKind` names (`'string'`, `'number'`, `'boolean'`) are deliberately
+the same words JavaScript's `typeof` returns, so `checkAttributes` in
+`validate.ts` can compare a value against its declared kind in one expression:
+`typeof value !== spec.kind`. The same shortcut is used when checking an
+`override` in `registry.ts`.
+
+That is a decision, not an oversight, and it has a known price: the model has no
+`null`, no lists, no nested values. Adding one means the shortcut stops working
+and must be replaced by an explicit `kindOf(value): AttributeKind` beside the
+types, with `checkAttributes` and the override check calling it instead of
+`typeof`. Nothing else in the engine assumes `typeof`; strict mode will point at
+every site that does.
+
 ## Layers above
 
 | Layer | Lives in | Knows |
