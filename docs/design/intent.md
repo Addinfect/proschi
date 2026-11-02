@@ -62,24 +62,31 @@ Two consequences to design for, not around:
 
 ## 4. What a state says about the world
 
-A state is not just a label; it asserts things. `ON` says the output is `1`,
-`OFF` says it is `0`, `WAIT` says nothing. Every state therefore carries
-attributes, and a transition may declare an effect (`sets: output = 0`).
+A state is not just a label; it does things. The vocabulary is the familiar one —
+`entry`, `do`, `exit` — with the restriction that keeps it checkable: `entry` and
+`exit` may only assign a **constant** to a declared output (`entry { output = 1 }`),
+never an expression, and `do` names a continuous activity without writing anything
+(an activity that writes is a state of its own).
 
-That gives the check this fork exists for:
+Two notations, one meaning. `output = 1` written on the state is shorthand for
+`entry { output = 1 }`. `sets: output = 0` on a transition is redundant with
+`entry`/`exit`, and survives only as an *assertion*: a declared change has to
+agree with what the two states' entries imply, or the model contradicts itself.
 
-- The output value is a property of the **state**, so "it does not change when we
-  pass through" is not an effect anybody can forget to declare — it is the absence
-  of a difference between the two states. Drift is impossible by construction.
-- A declared effect is cross-checked against the difference of the two states: a
-  transition claiming `output = 0` into a state that says `output = 1` is a
-  contradiction, and it is found without running anything.
+Because the model has no time, three simplifications hold — and they are what make
+the checks cheap:
 
-**Absent means "not asserted", not "inherited".** `WAIT` without an `output`
-attribute is a hole in the model, not a promise to keep the previous value, and
-the check says so in three outcomes: *agrees*, *contradicts*, or **unknown** —
-"`WAIT` says nothing about `output`, so stability is not proven". Silent
-inheritance would fill the hole and hide exactly the thing worth seeing.
+- `exit` is a default for the successors that do not write the variable; there is
+  no "during the transition" to distinguish from "on entry".
+- A variable holds the value the path last wrote. A state that does not write it
+  keeps it, which is the `WAIT()` case.
+- A path is a finite walk, so the value of a variable in a state is computable from
+  the graph alone.
+
+So a check has three outcomes: *agrees*, *contradicts*, or **path-dependent** —
+"in `WAIT`, `output` is `1` via `ON` and `0` via `OFF`". Path-dependence is not
+the same as a mistake: it is the smell that behaviour depends on history, and it
+is precisely what an emergency-stop requirement must not have.
 
 ## 5. Orthogonal regions, not more inheritance
 
@@ -128,6 +135,30 @@ referenced record exists is a text scan over the `.trlc` files, which belongs in
 script or in CI, not in a browser. Adopting TRLC later then costs an importer, not
 a rework.
 
+### Requirements as prose, and as property
+
+TRLC holds **application** requirements, written as prose, reviewed by people. The
+diagram is *one* model of how such a requirement could be implemented — it does
+not restate the sentence. So a requirement node carries `source`, the links, and
+**optionally** a `check`: one named predicate over the design, such as
+`no-output-active` evaluated over the states reachable after `estop`.
+
+That "optionally" is the design, not a compromise. Most requirements stay prose
+with traceability links: the finding they earn is "nothing implements it". A few
+are graph properties and get a predicate. Nothing anywhere promises that the tool
+verifies a German sentence.
+
+The risk to say out loud: prose and formalisation are two artifacts, and they
+drift. The sentence grows "for more than 20 ms", the predicate still checks
+"never", the check stays green while the requirement moved. The tool cannot close
+that gap. It can only show the two side by side, and mark a predicate stale when
+the requirement behind it changed.
+
+Which is the real use of an AI here: let it propose the sentence *and* the
+formalisation together, and let the checker catch where the formalisation is
+wrong — a mismatch against the prose is then found by a human reading both,
+which is cheaper than a human writing predicates.
+
 ## 7. What we deliberately do not build
 
 | Not building | Why |
@@ -142,7 +173,8 @@ a rework.
 1. **Edge attributes in `RelationSpec`** — triggers, guards and effects become
    data. Everything else is blocked on this; the label convention was fine for
    drawing and is not fine for checking.
-2. **State attributes, effects and the three-outcome check** (§4).
+2. **`entry` / `do` / `exit` lowered onto state attributes** (§4), plus the
+   path-dependent analysis and the three-outcome check.
 3. **Composite and orthogonal states** (§5), emergency stop as the test case.
 4. **`src/views/` with a scope** (§3) — structure, behaviour, control flow.
 5. **Control flow** as a reading: `step` nodes, guarded steps, loops, and the four
@@ -157,4 +189,5 @@ a rework.
 | Question | Note |
 | --- | --- |
 | One edge for both `state` and `step`? | Their graphs are structurally the same: nodes, guarded edges, loops allowed, entry marked. Unifying `moves-to` to work on an abstract `vertex` (with `state` and `step` below it) makes control flow nearly free and the determinism check shared. Cost: a small change to the committed ontology and its test. |
+| Where are output variables declared? | `entry { output = 1 }` needs a declaration per machine, and the attribute model holds scalars only. Cheap now: one attribute per output, named by convention, declared in the ontology — a typo is then an `unknown-attribute`. Principled later: `signal` nodes owned by the machine, so a requirement can name an output by id. Decide when the parser is touched, not before. |
 | Does a state's attribute ever change *without* a transition? | Today: no. Interrupts write outputs asynchronously, so a model that says otherwise is a lie; if it is needed, it is a second kind of edge, not an exception to this one. |
