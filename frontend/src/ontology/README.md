@@ -1,7 +1,9 @@
 # The architecture ontology
 
 The engine knows nodes, edges, types and relations. This directory says what the
-names mean for software architecture, and how to read one graph three ways.
+names mean for software architecture, and how to read one graph three ways. Why
+the vocabulary is cut this way, and what it cannot express yet, is in
+[`docs/design/metamodel.md`](../../../docs/design/metamodel.md).
 
 ```
 architecture.ts  ARCHITECTURE: types, relations, layer vocabulary — plain data
