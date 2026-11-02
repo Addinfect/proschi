@@ -266,7 +266,7 @@ export function weaklyConnected(index: GraphIndex): Id[][] {
       if (id === undefined) break;
       group.push(id);
       for (const edge of [...(index.outgoing.get(id) ?? []), ...(index.incoming.get(id) ?? [])]) {
-        const other = edge.source === id ? edge.target : edge.source;
+        const other: Id = edge.source === id ? edge.target : edge.source;
         if (other === id || seen.has(other) || !index.nodes.has(other)) continue;
         seen.add(other);
         queue.push(other);
