@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "check:engine-boundary": "node scripts/check-engine-boundary.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "e2e": "playwright test",
