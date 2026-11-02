@@ -66,8 +66,12 @@ every site that does.
 | --- | --- | --- |
 | Engine | `src/engine/` (this directory) | nodes, edges, types, relations, checks |
 | Ontology | `src/ontology/` | the subject matter, as data |
-| View | `src/views/` | how to draw a graph for a reader |
-| Model | `src/model/` | one saved or edited graph |
+| View | `src/views/` (not written yet) | how to draw a graph for a reader |
+
+A saved graph is not a layer of its own: the editor keeps the text, and the
+engine takes the graph as an argument. `src/model/` in this repository already
+means something else — the numbers pinned into the simulation page — which is
+reason enough not to reuse the name for a second thing.
 
 The dependency arrow points one way: view → ontology → engine. An ontology may
 declare types and relations; a view may not add rules the ontology does not have,

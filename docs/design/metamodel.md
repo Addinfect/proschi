@@ -21,8 +21,12 @@ Four layers, each knowing only the one below:
 | --- | --- | --- |
 | Engine | `frontend/src/engine/` | nodes, edges, types, relations, checks |
 | Ontology | `frontend/src/ontology/` | the subject matter, as data |
-| View | `frontend/src/views/` *(not yet)* | how to draw a graph for a reader |
-| Model | `frontend/src/model/` *(not yet)* | one saved or edited graph |
+| View | `frontend/src/views/` *(not written yet)* | how to draw a graph for a reader |
+
+There is no model layer: the editor keeps the text, and the engine takes the
+graph as an argument on every call. `frontend/src/model/` already exists and
+means the numbers pinned into the simulation page (`pins.ts`) — taken, and not
+to be reused.
 
 `npm run check:engine-boundary` fails the build when the engine imports from
 outside itself or mentions a word from its subject matter. The ban-list is data in
@@ -46,8 +50,9 @@ writes another `OntologySpec` beside this one.
 **The engine is read-only.** The draft sketched `createNode`/`updateNode` mutators.
 What was built takes the graph as an argument and returns issues:
 `validateGraph(graph, ontology)`, `indexGraph(graph)`, `expandMachine(graph, id)`.
-Mutation belongs to the model layer, where undo, autosave and dirty state live.
-A pure function is what makes the checks testable and the views free of state.
+Mutation stays in the editor, where the text and its undo live; the engine only
+ever sees a finished graph. A pure function is what makes the checks testable
+and the views free of state.
 
 **Attributes are scalars.** `string | number | boolean`, and an absent key means
 "not set" — there is no `null`. The kinds are spelled exactly as `typeof` returns
