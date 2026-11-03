@@ -86,9 +86,26 @@ A level that was opened is framed, and the frame is where a `cross` edge stops �
 which is what `crosses` means: the rest of the edge is behind the frame, one click
 away, not lost.
 
+## `ink.ts`
+
+The last step before a `<svg>`: attribute strings.
+
+```ts
+const d = drawnPath(edge);      // the line, stopped at the base of the head
+const head = headPath(edge);    // the filled triangle, turned into the last leg
+const text = fitLabel(box.label, box.width, { charWidth: 7 });
+```
+
+Strings are what an element needs and what a test can read, so this file has no
+DOM either. Two decisions belong here, and only here: the line has to stop where
+the head begins, or the stroke runs out past the point; and a label longer than its
+box is shortened with an ellipsis, because a box that grows with its label would
+undo the ranks. Colour, dash and weight are the stylesheet's business: `kind` is
+handed out by the layout and styled by CSS.
+
 ## Not written yet
 
-The painting itself, and the two readings that are not a level of a tree (§6 of
-`docs/design/metamodel.md`): the Harel-style statechart and the control-flow reading
-of `step` nodes. Both are drawn from `expandMachine`/`readPaths` in `src/ontology/`
-and are not scope questions — a statechart is not drawn one level at a time.
+The component that loops over a layout and returns a `<svg>`, and the two readings
+that are not a level of a tree (§6 of `docs/design/metamodel.md`): the Harel-style
+statechart and the control-flow reading of `step` nodes. Both are drawn from
+`expandMachine`/`readPaths` in `src/ontology/`, and are not scope questions — a statechart is not drawn one level at a time.
