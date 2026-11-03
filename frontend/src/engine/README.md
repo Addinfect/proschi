@@ -42,9 +42,12 @@ that reason.
   the scalars an edge of this relation may carry.
 
 `acyclic: true` is what makes a relation an order (dependencies, containment);
-leaving it off allows a cycle (usage, calls, transitions). `maxIn: 1` is what
-makes a relation a tree (composition, inheritance of a single parent). One graph
-therefore reads as several structures at once, chosen by `WalkOptions.relations`.
+leaving it off allows a cycle (usage, calls, transitions). A node joined to itself is
+reported once, under the narrower code: `self-loop` when the relation forbids
+self-loops, `cycle` when it allows them and forbids cycles. One edge, one code.
+`maxIn: 1` is what makes a relation a tree (composition, inheritance of a single
+parent). One graph therefore reads as several structures at once, chosen by
+`WalkOptions.relations`.
 
 Attributes are checked in both places they can be written. `validateGraph` holds
 every node against its type and every edge against its relation, with the same

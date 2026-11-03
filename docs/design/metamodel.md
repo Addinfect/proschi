@@ -106,7 +106,9 @@ which of its states it starts in), and reuses `many-parents` for a state that si
 inside two and `initial-unknown` for one starting outside itself. Reading what a state
 writes adds `duplicate-output`, `bad-effect`, `unknown-output` and `duplicate-effect`;
 reading the transitions adds `duplicate-trigger`, `many-defaults` and the path codes
-below.
+below. One defect carries one code: an edge that leaves and enters the same node is a
+`self-loop` when the relation forbids self-loops, and a `cycle` when it allows them
+but forbids cycles — never both.
 Each issue says which node, and the reading falls back to what it can still say — a
 broken machine still gets drawn.
 

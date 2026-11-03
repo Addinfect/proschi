@@ -248,6 +248,36 @@ describe('validateGraph', () => {
     expect(codes).toEqual(['cycle']);
   });
 
+  it('names a self-loop once, as a cycle, when the relation allows self-loops', () => {
+    // `links` lets an edge start and end on the same node but forbids cycles, so the
+    // loop of one is a `cycle` -- and not a `self-loop` beside it as well.
+    const codes = codesOf({
+      nodes: [{ id: 'a', type: 'part' }],
+      edges: [{ id: 'a-a', relation: 'links', source: 'a', target: 'a' }],
+    });
+    expect(codes).toEqual(['cycle']);
+  });
+
+  it('names a self-loop once, as a self-loop, when the relation forbids them', () => {
+    const built = buildOntology({
+      types: [{ name: 'unit' }],
+      relations: [
+        {
+          name: 'links',
+          source: ['unit'],
+          target: ['unit'],
+          acyclic: true,
+          allowSelfLoops: false,
+        },
+      ],
+    });
+    const codes = validateGraph(built.ontology, {
+      nodes: [{ id: 'a', type: 'unit' }],
+      edges: [{ id: 'a-a', relation: 'links', source: 'a', target: 'a' }],
+    }).map((issue) => issue.code);
+    expect(codes).toEqual(['self-loop']);
+  });
+
   it('allows a cycle a relation permits', () => {
     expect(
       codesOf({

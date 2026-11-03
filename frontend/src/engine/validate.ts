@@ -184,6 +184,11 @@ export function validateGraph(
 
     if (relation.acyclic) {
       for (const group of cycles(index, { relations: [relation.name] })) {
+        // A node with an edge to itself is a group of one. When the relation forbids
+        // self-loops, `self-loop` above already names that edge and this would be the
+        // same defect under a second code. When it allows them, the group of one is the
+        // only thing making the relation cyclic, so `cycle` is the one report.
+        if (group.length < 2 && !relation.allowSelfLoops) continue;
         const first = group[0];
         issues.push({
           severity: 'error',

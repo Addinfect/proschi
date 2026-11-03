@@ -367,11 +367,11 @@ describe('a state inside a state', () => {
           target: 'running',
         }),
       ),
-      // Two codes for one edge: `self-loop` says an edge that leaves and enters the same
-      // node may not be a `contains` at all, `cycle` says the relation must stay acyclic.
-      // The engine reports every acyclic relation that way -- `depends-on`, `composes`
-      // and `inherits` too -- so this is the engine as it is, not a rule of this ontology.
-    ).toEqual(['self-loop', 'cycle']);
+      // One code: an edge that leaves and enters the same node is a `self-loop`, and
+      // the engine does not repeat the same defect as a `cycle` of one. It reports
+      // every acyclic relation that way -- `depends-on`, `composes` and `inherits`
+      // too -- so this is the engine, not a rule of this ontology.
+    ).toEqual(['self-loop']);
   });
 
   it('refuses a tree of states that closes on itself', () => {
