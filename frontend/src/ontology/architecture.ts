@@ -63,6 +63,21 @@ export const TRIGGER = 'trigger';
 /** A `moves-to` edge's guard: why this transition, when several leave the same state. */
 export const GUARD = 'guard';
 
+/** A state's `entry`: what it sets on the way in, as `name = value` pieces. */
+export const ENTRY = 'entry';
+
+/** A state's `exit`: what it sets on the way out. */
+export const EXIT = 'exit';
+
+/** The activity a state runs while it is held: a name, not a call. */
+export const ACTIVITY = 'do';
+
+/**
+ * The outputs a machine declares, comma-separated, so that `entry` and `exit` have
+ * names to write and a typo in one is an `unknown-output` rather than a new signal.
+ */
+export const OUTPUTS = 'outputs';
+
 /** The machine takes over the behaviour of another one. */
 export const INHERITS = 'inherits';
 
@@ -101,6 +116,12 @@ export const ARCHITECTURE: OntologySpec = {
       name: 'machine',
       extends: ['element'],
       doc: 'The states one module moves through. Drawn as a statechart, not as a box.',
+      attributes: {
+        outputs: {
+          kind: 'string',
+          doc: 'The values its states may set, comma-separated. Declared here and nowhere else, so a misspelt output is caught instead of invented.',
+        },
+      },
     },
     {
       name: 'state',
@@ -110,6 +131,18 @@ export const ARCHITECTURE: OntologySpec = {
         overrides: {
           kind: 'string',
           doc: 'Id of the inherited state this one replaces. Read by expand.ts, and only meaningful in a machine that inherits another.',
+        },
+        entry: {
+          kind: 'string',
+          doc: 'What the state sets on entering, as `name = value` pieces separated by `;`. Constants only: a number, true, false or a quoted string.',
+        },
+        exit: {
+          kind: 'string',
+          doc: 'What the state sets on leaving, in the same notation as `entry`.',
+        },
+        do: {
+          kind: 'string',
+          doc: 'The activity that runs while the machine is in this state. A name; nothing calls it and nothing checks that it exists.',
         },
       },
     },

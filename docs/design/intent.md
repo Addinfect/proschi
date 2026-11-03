@@ -69,7 +69,11 @@ never an expression, and `do` names a continuous activity without writing anythi
 (an activity that writes is a state of its own).
 
 Two notations, one meaning. `output = 1` written on the state is shorthand for
-`entry { output = 1 }`. `sets: output = 0` on a transition is redundant with
+`entry { output = 1 }`. **Implemented is only the canonical one** — `entry` and
+`exit` as one string of `name = value` pieces, with the names declared by the
+machine in `outputs` (see `frontend/src/ontology/README.md`). The shorthand needs
+the output names to be attributes, which ties the ontology to one project's
+signals; it can come back the day a `signal` node can be named by id. `sets: output = 0` on a transition is redundant with
 `entry`/`exit`, and survives only as an *assertion*: a declared change has to
 agree with what the two states' entries imply, or the model contradicts itself.
 
@@ -176,8 +180,10 @@ which is cheaper than a human writing predicates.
    `many-defaults` (two transitions without a trigger under different guards).
    Both are machine semantics, so they stay out of `src/engine/`. What is left of
    this step is guard *overlap*, which needs predicates and is parked with them (§9).
-2. **`entry` / `do` / `exit` lowered onto state attributes** (§4), plus the
-   path-dependent analysis and the three-outcome check.
+2. **`entry` / `do` / `exit` lowered onto state attributes** (§4) — read and
+   checked: the pieces are parsed, the names are declared, and `bad-effect`,
+   `unknown-output` and `duplicate-output` are reported. Still open from this step:
+   the path-dependent analysis and the three-outcome check.
 3. **Composite and orthogonal states** (§5), emergency stop as the test case.
 4. **`src/views/` with a scope** (§3) — structure, behaviour, control flow.
 5. **Control flow** as a reading: `step` nodes, guarded steps, loops, and the four
@@ -192,5 +198,5 @@ which is cheaper than a human writing predicates.
 | Question | Note |
 | --- | --- |
 | One edge for both `state` and `step`? | Their graphs are structurally the same: nodes, guarded edges, loops allowed, entry marked. Unifying `moves-to` to work on an abstract `vertex` (with `state` and `step` below it) makes control flow nearly free and the determinism check shared. Cost: a small change to the committed ontology and its test. |
-| Where are output variables declared? | `entry { output = 1 }` needs a declaration per machine, and the attribute model holds scalars only. Cheap now: one attribute per output, named by convention, declared in the ontology — a typo is then an `unknown-attribute`. Principled later: `signal` nodes owned by the machine, so a requirement can name an output by id. Decide when the parser is touched, not before. |
+| ~~Where are output variables declared?~~ | Decided: one `outputs` attribute on the machine, comma-separated (`outputs: 'armed, mode'`), collected along the inheritance chain. Keeps the ontology free of one project's signals and still makes a typo an `unknown-output`. A `signal` node owned by the machine remains the better answer once a requirement has to name an output by id — nothing built here blocks it. |
 | Does a state's attribute ever change *without* a transition? | Today: no. Interrupts write outputs asynchronously, so a model that says otherwise is a lie; if it is needed, it is a second kind of edge, not an exception to this one. |

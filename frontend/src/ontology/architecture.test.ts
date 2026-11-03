@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { buildOntology, validateGraph, type Graph } from '../engine';
 import {
+  ACTIVITY,
   ARCHITECTURE,
   COMPOSES,
   DEPENDS_ON,
+  ENTRY,
+  EXIT,
+  OUTPUTS,
   INHERITS,
   MACHINE,
   MOVES_TO,
@@ -427,6 +431,105 @@ describe('what a trigger rules out', () => {
       { id: 'a-to-c', relation: MOVES_TO, source: 'a', target: 'c' },
     );
     expect(issuesOf(graphed)).toEqual(['duplicate-trigger@a']);
+  });
+});
+
+describe('what a state writes', () => {
+  /** A machine declaring two outputs, with the states a test adds. `idle` must be one of them. */
+  function withStates(states: Graph['nodes'], edges: Graph['edges'] = []): Graph {
+    return {
+      nodes: [{ id: 'machine', type: MACHINE, attributes: { [OUTPUTS]: 'armed, mode' } }, ...states],
+      edges: [
+        { id: 'machine-owns-idle', relation: OWNS, source: 'machine', target: 'idle' },
+        { id: 'machine-starts', relation: STARTS_AT, source: 'machine', target: 'idle' },
+        ...edges,
+      ],
+    };
+  }
+
+  /** Every code an expansion reports, with the subject it names. */
+  function issuesOf(graphed: Graph): string[] {
+    return expandMachine(graphed, 'machine').issues.map(
+      (issue) => `${issue.code}@${issue.subject ?? ''}`,
+    );
+  }
+
+  it('reads entry and exit into assignments and `do` into an activity', () => {
+    const graphed = withStates([
+      {
+        id: 'idle',
+        type: STATE,
+        attributes: {
+          [ENTRY]: 'armed = 1; mode = "auto"',
+          [EXIT]: 'armed = 0',
+          [ACTIVITY]: 'poll',
+        },
+      },
+    ]);
+    const view = expandMachine(graphed, 'machine');
+    expect(view.issues).toEqual([]);
+    expect(view.outputs).toEqual(['armed', 'mode']);
+    const idle = view.states[0];
+    expect(idle?.entry).toEqual([
+      { output: 'armed', value: 1 },
+      { output: 'mode', value: 'auto' },
+    ]);
+    expect(idle?.exit).toEqual([{ output: 'armed', value: 0 }]);
+    expect(idle?.activity).toBe('poll');
+  });
+
+  it('refuses an output the machine does not declare', () => {
+    const graphed = withStates([
+      { id: 'idle', type: STATE, attributes: { [ENTRY]: 'armed = 1; aremd = 0' } },
+    ]);
+    expect(issuesOf(graphed)).toEqual(['unknown-output@idle']);
+  });
+
+  it('refuses a piece that is not an assignment, and a bare word as a value', () => {
+    expect(
+      issuesOf(withStates([{ id: 'idle', type: STATE, attributes: { [ENTRY]: 'armed 1' } }])),
+    ).toEqual(['bad-effect@idle']);
+    expect(
+      issuesOf(withStates([{ id: 'idle', type: STATE, attributes: { [EXIT]: 'mode = auto' } }])),
+    ).toEqual(['bad-effect@idle']);
+  });
+
+  it('reports an output a machine declares twice', () => {
+    const graphed: Graph = {
+      nodes: [
+        { id: 'machine', type: MACHINE, attributes: { [OUTPUTS]: 'armed, armed' } },
+        { id: 'idle', type: STATE },
+      ],
+      edges: [
+        { id: 'machine-owns-idle', relation: OWNS, source: 'machine', target: 'idle' },
+        { id: 'machine-starts', relation: STARTS_AT, source: 'machine', target: 'idle' },
+      ],
+    };
+    expect(issuesOf(graphed)).toEqual(['duplicate-output@machine']);
+  });
+
+  it('lets a child machine add an output and an inherited state keep writing the parent one', () => {
+    const graphed: Graph = {
+      nodes: [
+        { id: 'base', type: MACHINE, attributes: { [OUTPUTS]: 'armed' } },
+        { id: 'child', type: MACHINE, attributes: { [OUTPUTS]: 'tripped' } },
+        { id: 'idle', type: STATE },
+        { id: 'running', type: STATE, attributes: { [ENTRY]: 'armed = 1; tripped = false' } },
+      ],
+      edges: [
+        { id: 'base-owns-idle', relation: OWNS, source: 'base', target: 'idle' },
+        { id: 'base-owns-running', relation: OWNS, source: 'base', target: 'running' },
+        { id: 'base-starts', relation: STARTS_AT, source: 'base', target: 'idle' },
+        { id: 'child-inherits', relation: INHERITS, source: 'child', target: 'base' },
+      ],
+    };
+    const view = expandMachine(graphed, 'child');
+    expect(view.issues).toEqual([]);
+    expect(view.outputs).toEqual(['tripped', 'armed']);
+    expect(view.states[1]?.entry).toEqual([
+      { output: 'armed', value: 1 },
+      { output: 'tripped', value: false },
+    ]);
   });
 });
 

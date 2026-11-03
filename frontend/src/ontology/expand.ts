@@ -8,10 +8,14 @@ import {
   type Node,
 } from '../engine';
 import {
+  ACTIVITY,
+  ENTRY,
+  EXIT,
   GUARD,
   INHERITS,
   MACHINE,
   MOVES_TO,
+  OUTPUTS,
   OWNS,
   OVERRIDES,
   STARTS_AT,
@@ -37,6 +41,14 @@ import {
  * are sound still come back with them -- the rule the engine's registry follows.
  */
 
+/** One output a state sets to a constant on the way in or out. */
+export interface AssignmentView {
+  /** Output name, as the machine declared it. */
+  output: string;
+  /** The constant assigned: a number, a boolean, or the text between quotes. */
+  value: string | number | boolean;
+}
+
 /** One state as an expanded machine sees it. */
 export interface StateView {
   /** Node id of the state that is in force at this level of inheritance. */
@@ -51,6 +63,12 @@ export interface StateView {
   declaredBy: Id;
   /** Id of the inherited state this one replaced, when it replaced one. */
   overrides?: Id;
+  /** Outputs the state sets on entering, in the order written. */
+  entry: readonly AssignmentView[];
+  /** Outputs the state sets on leaving, in the order written. */
+  exit: readonly AssignmentView[];
+  /** The activity that runs while the machine is held here, when one is named. */
+  activity?: string;
 }
 
 /** One transition as an expanded machine sees it. */
@@ -81,6 +99,8 @@ export interface MachineView {
   states: readonly StateView[];
   /** Transitions between states in force, in graph order, with both ends resolved through overrides. */
   transitions: readonly TransitionView[];
+  /** Outputs the states of this machine may set, own ones first, then the inherited ones. */
+  outputs: readonly string[];
   /** The state the machine starts in, after overrides; absent when the model does not say. */
   initial?: Id;
   issues: Issue[];
@@ -113,7 +133,7 @@ export function expandMachine(graph: Graph, machine: Id): MachineView {
       subject: machine,
       message: `"${machine}" is not a machine in this graph.`,
     });
-    return { machine, states: [], transitions: [], issues };
+    return { machine, states: [], transitions: [], outputs: [], issues };
   }
 
   // The chain of machines: the expanded one first, its root ancestor last.
@@ -154,6 +174,34 @@ export function expandMachine(graph: Graph, machine: Id): MachineView {
     walked.add(parent);
     chain.push(parent);
     current = parent;
+  }
+
+  // The outputs the machine declares, comma-separated on the machine itself, plus
+  // whatever its ancestors declare: an inherited state may write a parent's output,
+  // because a child that extends a machine still enters the inherited states. A name
+  // declared twice by the same machine is a mistake; a child redeclaring a parent's
+  // name is not, it is just the same output again.
+  const outputs: string[] = [];
+  const declaredOutput = new Set<string>();
+  for (const owner of chain) {
+    const ownerNode = nodes.get(owner);
+    if (!ownerNode) continue;
+    const here = new Set<string>();
+    for (const name of listOf(ownerNode, OUTPUTS)) {
+      if (here.has(name)) {
+        issues.push({
+          severity: 'error',
+          code: 'duplicate-output',
+          subject: owner,
+          message: `"${owner}" declares the output "${name}" twice.`,
+        });
+        continue;
+      }
+      here.add(name);
+      if (declaredOutput.has(name)) continue;
+      declaredOutput.add(name);
+      outputs.push(name);
+    }
   }
 
   /** Id in force, after any number of replacements. */
@@ -238,6 +286,9 @@ export function expandMachine(graph: Graph, machine: Id): MachineView {
       final: state.attributes?.final === true,
       declaredBy: declaredBy.get(id) ?? machine,
       overrides: overrode.get(id),
+      entry: parseEffects(textOf(state, ENTRY), 'entry', id, declaredOutput, issues),
+      exit: parseEffects(textOf(state, EXIT), 'exit', id, declaredOutput, issues),
+      activity: textOf(state, ACTIVITY),
     });
   }
 
@@ -340,16 +391,93 @@ export function expandMachine(graph: Graph, machine: Id): MachineView {
     }
   }
 
-  return { machine, states, transitions, initial, issues };
+  return { machine, states, transitions, outputs, initial, issues };
 }
 
 /**
- * A text attribute of an edge, when it is set. Attributes are scalars, so this also
- * refuses the case where an author wrote a number where a name belongs; the check
- * for that is the engine's `attribute-kind`, and this only declines to read it.
+ * A text attribute of an edge or a node, when it is set. Attributes are scalars, so
+ * this also refuses the case where an author wrote a number where a name belongs;
+ * the check for that is the engine's `attribute-kind`, and this only declines to
+ * read it.
  */
-function textOf(edge: Edge, key: string): string | undefined {
-  const value = edge.attributes?.[key];
+function textOf(holder: Edge | Node, key: string): string | undefined {
+  const value = holder.attributes?.[key];
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/** A comma-separated list of names, ignoring empty pieces. */
+function listOf(node: Node, key: string): string[] {
+  const written = textOf(node, key);
+  if (written === undefined) return [];
+  return written
+    .split(',')
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0);
+}
+
+/**
+ * What a state writes on entering or leaving, read from one string.
+ *
+ * The notation is deliberately two characters wide: `name = value` pieces separated
+ * by `;`, and a value that is a number, `true`, `false` or a quoted string. Nothing
+ * is evaluated, so a bare word is refused rather than quietly taken as text -- a
+ * misspelling that becomes a signal is the failure this check exists to prevent.
+ *
+ * The cost of keeping this out of the engine is this function: the engine sees one
+ * string attribute, and the subject matter -- that a state writes outputs -- is read
+ * here. That is the same trade as the trigger, and it keeps `src/engine/` ignorant
+ * of statecharts.
+ */
+function parseEffects(
+  written: string | undefined,
+  key: string,
+  state: Id,
+  outputs: ReadonlySet<string>,
+  issues: Issue[],
+): AssignmentView[] {
+  if (written === undefined) return [];
+  const assignments: AssignmentView[] = [];
+  for (const piece of written.split(';')) {
+    const text = piece.trim();
+    if (text.length === 0) continue;
+    const at = text.indexOf('=');
+    const name = at < 0 ? '' : text.slice(0, at).trim();
+    const value = at < 0 ? undefined : constantOf(text.slice(at + 1).trim());
+    if (name.length === 0 || value === undefined) {
+      issues.push({
+        severity: 'error',
+        code: 'bad-effect',
+        subject: state,
+        message: `"${state}" writes "${text}" in its ${key}; a piece is \`name = value\` with a number, true, false or a quoted string.`,
+      });
+      continue;
+    }
+    if (!outputs.has(name)) {
+      issues.push({
+        severity: 'error',
+        code: 'unknown-output',
+        subject: state,
+        message: `"${state}" sets "${name}" in its ${key}, which no machine in the chain declares in \`outputs\`.`,
+      });
+      continue;
+    }
+    assignments.push({ output: name, value });
+  }
+  return assignments;
+}
+
+/**
+ * The constant a value piece names, or nothing when it names no constant. Quoted
+ * text is returned without its quotes, so a view can show it as written.
+ */
+function constantOf(text: string): string | number | boolean | undefined {
+  if (text === 'true') return true;
+  if (text === 'false') return false;
+  if (/^-?\d+(\.\d+)?$/.test(text)) return Number(text);
+  const quote = text.charAt(0);
+  if (text.length > 1 && (quote === '"' || quote === "'") && text.endsWith(quote)) {
+    return text.slice(1, -1);
+  }
+  return undefined;
 }
 

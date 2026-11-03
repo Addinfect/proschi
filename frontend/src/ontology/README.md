@@ -96,6 +96,47 @@ Both checks belong here and not in `src/engine/`: "in one state at a time" is wh
 a state machine means, not what a typed graph means. The engine checks that a
 trigger is a string; this file checks what the string rules out.
 
+## What a state writes
+
+`entry` and `exit` are one string each: `name = value` pieces separated by `;`,
+where a value is a number, `true`, `false` or a quoted string. `do` names an
+activity and writes nothing.
+
+```ts
+{
+  id: 'armed',
+  type: STATE,
+  attributes: {
+    [ENTRY]: 'armed = 1; mode = "auto"',
+    [EXIT]: 'armed = 0',
+    [ACTIVITY]: 'poll',
+  },
+}
+```
+
+`expandMachine` reads them into `StateView.entry`, `.exit` and `.activity` as
+`AssignmentView[]`, so a view never re-parses text. The names must be declared by
+the machine — `outputs: 'armed, mode'` — because that declaration is what turns a
+misspelt output into `unknown-output` instead of a new signal:
+
+- `bad-effect` — a piece that is not `name = value`, or a value that is a bare
+  word. Bare words are refused on purpose: `mode = auto` is one keystroke away from
+  `mode = "auto"`, and only the quoted one is a decision.
+- `unknown-output` — the name is not among the outputs in force. Inherited outputs
+  count, because a child that extends a machine still enters its states.
+- `duplicate-output` — one machine names the same output twice. A child redeclaring
+  a parent's output is not this: that is the same output, not a second one.
+
+Outputs are collected along the chain, own first and then inherited, so the same
+state is checked in the machine that declares it and again in every machine that
+inherits it. It may be fine in one and not the other, and that is the honest answer:
+the writing is the state's, the declaration is the machine's.
+
+The shorthand `armed = 1` written straight onto a state as an attribute is **not**
+supported, although `docs/design/intent.md` §4 sketched it — that form needs the
+output names to be ontology attributes, which ties the ontology to one project's
+signals. One notation, not two.
+
 ## Known gaps
 
 - **No composite states.** A machine is flat. Nesting means an `owns` edge from
@@ -104,6 +145,10 @@ trigger is a string; this file checks what the string rules out.
 - **No reachability check.** `expandMachine` reports a missing initial state, but
   not a state no transition can reach. The engine already has `reachableFrom`;
   wiring it in is a few lines once a view wants to show it.
+- **`entry` / `exit` are not read along a path.** The assignments are parsed and
+  their names checked, but nothing yet says what a variable holds in a given state:
+  no path walk, no third check outcome, no contradiction between a declared change
+  and what the states imply. That is the rest of §4 and the next step.
 - **Guard overlap is not checked.** Two guards on the same event are accepted,
   and whether both can hold at once is never asked: a guard is a name, and
   deciding that needs the requirement predicates the model does not carry yet.
