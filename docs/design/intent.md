@@ -99,12 +99,23 @@ flat, that is one `estop` edge out of *every* state — n edges, and the next st
 somebody adds is missing one. Orthogonal regions (operating state × safety state)
 make it one edge that cannot be forgotten.
 
+Composite states give most of that for free: one `estop` written on the container is
+read as a crossing from every state inside it, so adding a state inside the container
+cannot forget the edge (§8 step 3). What a tree cannot do is hold two aspects at
+once: safety as a track of its own beside the operating state.
+
 So machine inheritance — modelled because the first draft asked for it, and rarely
-used in C — stays as it is and is not extended further; composite and orthogonal
-states are the next real work, with the emergency stop as the test case:
+used in C — stays as it is and is not extended further; orthogonal regions are the
+next real work, with the emergency stop as the test case:
 
 > Pressing emergency stop leads to no output being driven — where "no output
 > driven" is a state in which every declared output is `0`.
+
+Nested, that is already readable: `estop` lands in a state whose `entry` sets every
+output to `0`, and leaving the operating container runs that container's `exit`. The
+open question is whether safety is a *mode* of the machine — a container, built — or a
+parallel track beside it, a region, not built. The model decides, and the answer
+decides whether the requirement stays a path question or becomes a two-hierarchy one.
 
 ## 6. Requirements: trace first, check second
 
@@ -194,7 +205,18 @@ which is cheaper than a human writing predicates.
    from §4: arithmetic, timing, and a value that only holds while a transition
    crosses — the vocabulary has none of those, and guessing at them would be worse
    than the silence.
-3. **Composite and orthogonal states** (§5), emergency stop as the test case.
+3. ~~**Composite states**~~ (§5) — done, with the emergency stop as the test case. A
+   state may `contains` other states: one container per state, no cycles, so the
+   states of a machine form a tree. `expandMachine` reads it — a container is a level
+   of the statechart and not a configuration, entering one lands on the state it
+   `starts-at`, and an edge written on a container becomes one crossing from each
+   state at the bottom of it, carrying the edge's id and saying in
+   `declaredFrom` / `declaredTo` where it was written. `readPaths` reads a crossing as
+   a chain: `exit` runs outwards, `entry` inwards, so leaving a mode can set an output
+   once instead of in every state within it. New codes `contains-cycle` and
+   `no-entry`; `many-parents` and `initial-unknown` reused for the hierarchy.
+   **Orthogonal regions are still open** — a tree holds one state at a time, and two
+   aspects at once is a second relation, not a reading.
 4. **`src/views/` with a scope** (§3) — structure, behaviour, control flow.
 5. **Control flow** as a reading: `step` nodes, guarded steps, loops, and the four
    cheap findings — missing else, unreachable step, loop with no exit, two guards

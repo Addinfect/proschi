@@ -7,10 +7,11 @@ the vocabulary is cut this way, and what it cannot express yet, is in
 
 ```
 architecture.ts      ARCHITECTURE: types, relations, layer vocabulary — plain data
-expand.ts            expandMachine(): an inheritance chain flattened into one machine
+expand.ts            expandMachine(): inheritance flattened, a state hierarchy read
 paths.ts             readPaths(): what each output may hold in each state, checked
 architecture.test.ts
 paths.test.ts
+hierarchy.test.ts
 ```
 
 ## One graph, three readings
@@ -19,7 +20,7 @@ paths.test.ts
 | --- | --- | --- |
 | Structure | `depends-on` (acyclic) | what may call what; what a layer may see |
 | Flow | `uses`, `composes` | what is built from what; which path data takes |
-| Behaviour | `owns`, `starts-at`, `moves-to`, `inherits` | what a machine does |
+| Behaviour | `owns`, `contains`, `starts-at`, `moves-to`, `inherits` | what a machine does |
 
 The three share one node set, so a module drawn in the structure view is the same
 node the behaviour view names. `depends-on` is declared `acyclic: true`, which
@@ -143,6 +144,53 @@ supported, although `docs/design/intent.md` §4 sketched it — that form needs 
 output names to be ontology attributes, which ties the ontology to one project's
 signals. One notation, not two.
 
+## A state inside a state
+
+A state may `contains` other states: one container per state, no cycles, so the
+states of a machine form a tree.
+
+```ts
+{ id: 'running', type: STATE, attributes: { [ENTRY]: 'armed = true' } }   // a level
+{ id: 'spinning', type: STATE, attributes: { [ENTRY]: 'speed = 1' } }    // a state
+{ id: 'c1', relation: CONTAINS, source: 'running', target: 'spinning' }
+{ id: 's1', relation: STARTS_AT, source: 'running', target: 'spinning' }
+```
+
+A container is a **level** of the statechart, not a state the machine can be in. The
+machine is always in one of the states at the bottom of the tree, so `readPaths`
+gives those a row each and the containers none. Ownership does not change:
+`spinning` is still owned by the machine, and `contains` only says where inside it
+the state sits — `owns` is whose it is, `contains` is where.
+
+Two things follow that a flat machine cannot say:
+
+- **Entering a container lands on the state it starts at.** An edge into `running`
+  arrives in `spinning`. A container that names no `starts-at` is `no-entry` — which
+  state the machine enters is undecided, not defaulted to the first one drawn.
+- **An edge written on a container stands for one crossing per state at the bottom
+  of it.** `estop` on `running` is the n edges of the flat model collapsed into the
+  one the model wrote: `expandMachine` returns one transition per leaf, all carrying
+  that edge's id, and `declaredFrom` / `declaredTo` say where it was written. That is
+  also why the determinism check stays quiet — two copies of one edge are not two
+  transitions leaving one state.
+
+Because a crossing leaves and enters a chain rather than a state, `entry` and `exit`
+compose: the `exit` pieces run from the state left outwards, the `entry` pieces run
+from the outermost container inwards, and the two chains meet at the lowest container
+both ends are inside. Between two states of the same container that is just their
+own pieces; leaving `running` also writes `running.exit`, which is how "leaving this
+mode sets `drive = 0`" is written once instead of in every state within it. A
+transition from a state to itself still writes that state's `exit` and then its
+`entry`, exactly as it does in a flat machine.
+
+Nesting is not inheritance. A container is not a machine: it declares no `outputs`,
+it cannot be inherited, and its `starts-at` is a level's entry rather than a second
+initial state — the machine still has exactly one. Two errors come with the
+relation, `contains-cycle` when the containers run in a circle and `no-entry` when a
+container does not say what it starts in; a state inside two containers reuses
+`many-parents`, because "inside two" is the same modelling mistake as "owned by
+two".
+
 ## What a variable holds in a state
 
 `paths.ts` answers that question, and it is a path question: there is no time in
@@ -156,6 +204,10 @@ rules, and they are all of it — cross a transition from `A` to `B`, and for ou
    successors that say nothing;
 3. otherwise `B` holds what `A` held, unchanged. A state that writes nothing keeps
    everything, which is why waiting does not drive an output anywhere.
+
+`A` and `B` are states at the bottom of the tree. With states inside states the same
+three rules are read along the chain a crossing leaves and enters (see above), and
+the initial state is followed down to the leaf it stands on.
 
 The initial state is rule 1 alone: what it writes on entry, otherwise **nothing has
 written it yet** — which is not zero, and is reported as such.
@@ -209,10 +261,11 @@ started. For a hardware model that silence usually means a state is missing.
 
 ## Known gaps
 
-- **No composite states.** A machine is flat. Nesting means an `owns` edge from
-  state to state, plus a rule that the child machine's `starts-at` is entered on
-  entry — neither is declared. Everything in `paths.ts` assumes a flat machine, so
-  this is the next thing that changes it.
+- **No orthogonal regions.** Containment is a tree and a machine is in exactly one
+  state at a time, so two independent aspects — operating state and safety state —
+  cannot be held side by side. `contains` has already collapsed the n-fold emergency
+  stop into one edge on the container; a region is the case where two such
+  hierarchies hold at once, and that is a second relation rather than a reading.
 - **No reachability issue.** `readPaths` reports a state no path arrives at
   (`reachable: false`, no values) and `expandMachine` reports a missing initial
   state, but neither reports an unreachable state as an issue of its own — the

@@ -72,7 +72,7 @@ indistinguishable from a coincidence.
 | `module` | `element` | a unit of code with a boundary |
 | `interface` | `element` | a contract, depended on rather than known |
 | `machine` | `element` | drawn as a statechart, not as a box; declares `outputs`, the names it drives (`string`) |
-| `state` | — | deliberately *not* an element: it belongs to one machine and appears in no structural view. Declares what it writes — `entry`, `exit`, `do`, each a `string` list of `<output>=<constant>` pieces — plus `final` (`boolean`) and `overrides` (`string`, the id of the state it replaces) |
+| `state` | — | deliberately *not* an element: it belongs to one machine and appears in no structural view. Declares what it writes — `entry`, `exit`, `do`, each a `string` list of `<output>=<constant>` pieces — plus `final` (`boolean`) and `overrides` (`string`, the id of the state it replaces). It may hold states of its own; a state that does is a level of the statechart, not a configuration |
 
 | Relation | From → To | Rule |
 | --- | --- | --- |
@@ -81,7 +81,8 @@ indistinguishable from a coincidence.
 | `composes` | element → element | `maxIn: 1`, `acyclic` — containment is a tree |
 | `realizes` | module → interface | a module fulfils a contract |
 | `owns` | machine → state | `maxIn: 1` — one owner per state |
-| `starts-at` | machine → state | `maxOut: 1` — one entry state |
+| `contains` | state → state | `maxIn: 1`, `acyclic` — the states of a machine form a tree; a contained state is still owned by its machine |
+| `starts-at` | machine → state, state → state | `maxOut: 1` — one entry state; on a container, which state is entered first |
 | `moves-to` | state → state | self-loops allowed; declares `trigger`, `guard` and `sets` as **edge attributes** — the first two are names, never expressions; `sets` writes nothing, it asserts what the outputs already hold on arrival |
 | `inherits` | machine → machine | `maxOut: 1`, `acyclic` — one parent, so what is inherited is never in doubt |
 
@@ -99,11 +100,26 @@ flagged `retargeted` — provenance is visible, not lost.
 Problems are values, never exceptions. The engine reports `cycle`, `missing-attribute`,
 `abstract-type`, `too-many-in` and the rest; the ontology layer adds
 `unknown-machine`, `inherits-cycle`, `unknown-override`, `initial-unknown` and, as the
-only warning there, `no-initial`. Reading what a state writes adds
-`duplicate-output`, `bad-effect`, `unknown-output` and `duplicate-effect`; reading the
-transitions adds `duplicate-trigger`, `many-defaults` and the two path codes below.
+only warning there, `no-initial`. The hierarchy adds `contains-cycle` (the containers
+run in a circle; the hierarchy is cut there) and `no-entry` (a container does not say
+which of its states it starts in), and reuses `many-parents` for a state that sits
+inside two and `initial-unknown` for one starting outside itself. Reading what a state
+writes adds `duplicate-output`, `bad-effect`, `unknown-output` and `duplicate-effect`;
+reading the transitions adds `duplicate-trigger`, `many-defaults` and the path codes
+below.
 Each issue says which node, and the reading falls back to what it can still say — a
 broken machine still gets drawn.
+
+**A state may hold states.** The machine is then never in the container: it is in one
+of the states at the bottom of the tree, so `readPaths` gives those a row each and the
+containers none, and entering a container lands on the state it says it `starts-at`.
+An edge written on a container stands for one crossing from each state at the bottom
+of it — one edge in the model, one expanded transition per leaf, all carrying that
+edge's id and saying in `declaredFrom` / `declaredTo` where it was written, which is
+why the determinism checks do not fire on the copies. What a crossing writes composes:
+`exit` runs from the state left outwards, `entry` from the outermost container
+inwards, and the two chains meet at the lowest container both ends are inside — so
+leaving a mode can set an output once instead of in every state within it.
 
 **What a variable holds.** A machine declares `outputs`; a state writes some of them
 on `entry` and `exit`; `readPaths` then answers, for every state and every output,
@@ -121,10 +137,12 @@ than reported, and an output no state ever writes is `output-never-set`.
 ## 5. Two relations people conflate
 
 Hierarchy (a state contains substates) and inheritance (a machine specializes
-another) are different relations and are kept apart: `owns` is hierarchy,
-`inherits` is specialization. Today the hierarchy is flat — one machine owns its
-states, no nesting — which is why §7 lists composite states as the next gap rather
-than as a design question.
+another) are different relations and are kept apart: `owns` and `contains` are
+hierarchy, `inherits` is specialization. A container is not a machine with fewer
+states: it declares no `outputs`, it cannot be inherited, and its `starts-at` is a
+level's entry rather than a second initial state — the machine still has exactly one.
+What is still missing is the other axis, orthogonal regions, which is why §7 keeps
+it.
 
 ## 6. One model, many renderers
 
@@ -142,7 +160,7 @@ is why the three can share one graph and one set of checks.
 
 | Gap | Why it is not closed yet |
 | --- | --- |
-| **Composite / orthogonal states** | Needs `owns` between states plus an entry rule. The metamodel can already express the edges; the reading in `expandMachine` does not walk them. |
+| **Orthogonal regions** | `contains` made the hierarchy a tree, so a machine is in exactly one state at a time. Two aspects holding at once — operating state × safety state — need a second relation and a reading that runs two hierarchies side by side. Composite states themselves are in: `expandMachine` walks `contains` and `readPaths` reads a crossing as a chain. |
 | **Unreachable states** | `readPaths` marks each state `reachable: false` and says so when a `sets` assertion depends on it, but it raises no issue of its own — a state nobody reaches is worth reporting, and worth deciding whether it is an error. |
 | **Layer order** | `layer` is a closed list of words; it does not say that `presentation` may only depend on `application`. That is an order between types, which the metamodel cannot express. |
 | **Dead-dependency detector** | The draft's "declared `depends-on` but never `uses` — is it really a dependency?" is a cross-relation query nobody has written. |
