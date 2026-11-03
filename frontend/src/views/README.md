@@ -143,9 +143,35 @@ Three decisions worth naming:
 - **The ink is `ink.ts`'s.** The test compares the `d` it writes with `drawnPath`,
   so the two cannot drift apart.
 
-Not here yet: zoom and pan. They belong on the `viewBox` — one state, wheel and
-drag, then `getScreenCTM().inverse()` for a click on empty space — and they change
-nothing above this line.
+### The window onto the picture
+
+A level can be bigger than the space it is drawn in, so the canvas has a camera:
+three numbers on the `viewBox` (`x`, `y`, and how much of the picture's width is
+shown; the height follows, because a window with its own proportions would stretch
+every box).
+
+| Gesture | What it does |
+| --- | --- |
+| wheel | zooms about the point under the pointer, which stays where it is |
+| drag | pans, and does not exist at fit — there is nothing past the edge then |
+| double click | back to the whole picture |
+
+Four rules make it behave without a library:
+
+- **The camera cannot leave the picture.** It is clamped to the edges and to at most
+  `MAX_ZOOM` times the fit, which is why zooming out of a corner lands on the whole
+  picture without being told to.
+- **A drag is not a click.** A press that wanders more than `DRAG_SLOP` pans, and the
+  click that follows is swallowed in the capture phase — otherwise the box the pan
+  started on would open. Pointer capture is taken only once it *is* a pan, for the
+  same reason in reverse: a captured press retargets its own click onto the `<svg>`.
+- **Another level resets it.** A camera belongs to a picture; `layout` changed means
+  fit.
+- **It changes nothing below.** The camera is not a `<g transform>`: no box is moved,
+  no arrow is re-routed, and `layoutScope` never hears about it.
+
+Not here yet: the keyboard. The arrow keys are free (`boxInk` claims only Enter and
+Space), so panning them is a `tabIndex` on the `<svg>` and one more handler.
 
 ## Not written yet
 

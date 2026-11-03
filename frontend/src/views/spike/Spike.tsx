@@ -62,6 +62,7 @@ export default function Spike() {
               : ' Nothing to report.'}
           </p>
           <p>Marked: {selected ?? 'nothing'}</p>
+          <p>Wheel zooms, drag pans, double click gives the whole picture back.</p>
         </footer>
       </div>
     </main>

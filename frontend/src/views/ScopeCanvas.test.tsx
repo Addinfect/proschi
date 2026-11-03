@@ -131,3 +131,115 @@ describe('ScopeCanvas', () => {
     expect(marked[0]?.getAttribute('data-box')).toBe('orders.store');
   });
 });
+
+// The window onto the picture. Nothing here draws anything: a camera decides which
+// part of the same layout is in the window, and how big.
+//
+// No box is ever measured in jsdom -- `getBoundingClientRect` is all zeros -- so a
+// pointer pixel is one layout unit in these tests. That is the fallback the canvas
+// itself takes when it has not been laid out yet.
+describe('ScopeCanvas, moved', () => {
+  const fit = `0 0 ${layout.width} ${layout.height}`;
+
+  const canvas = (container: HTMLElement): Element => {
+    const svg = container.querySelector('[data-scope-canvas]');
+    if (svg === null) throw new Error('no canvas');
+    return svg;
+  };
+
+  const shown = (container: HTMLElement): readonly number[] =>
+    (canvas(container).getAttribute('viewBox') ?? '').split(' ').map(Number);
+
+  const wheel = (container: HTMLElement, deltaY: number): void => {
+    fireEvent.wheel(canvas(container), { deltaY });
+  };
+
+  const drag = (container: HTMLElement, from: readonly [number, number], to: readonly [number, number]): void => {
+    const svg = canvas(container);
+    fireEvent.pointerDown(svg, { pointerId: 1, button: 0, clientX: from[0], clientY: from[1] });
+    fireEvent.pointerMove(svg, { pointerId: 1, clientX: to[0], clientY: to[1] });
+    fireEvent.pointerUp(svg, { pointerId: 1, clientX: to[0], clientY: to[1] });
+  };
+
+  it('starts on the whole picture', () => {
+    const { container } = render(<ScopeCanvas layout={layout} />);
+    expect(canvas(container).getAttribute('viewBox')).toBe(fit);
+    expect(canvas(container).getAttribute('data-zoomed')).toBeNull();
+  });
+
+  it('closes the window on a wheel forward and keeps the proportions', () => {
+    const { container } = render(<ScopeCanvas layout={layout} />);
+    wheel(container, -120);
+    const after = shown(container);
+    expect(after[2]).toBeLessThan(layout.width);
+    // A window with its own proportions would stretch every box, and the layout
+    // decided the proportions.
+    expect(after[2] / after[3]).toBeCloseTo(layout.width / layout.height);
+    expect(canvas(container).getAttribute('data-zoomed')).toBe('');
+  });
+
+  it('opens the window again, and no further than the whole picture', () => {
+    const { container } = render(<ScopeCanvas layout={layout} />);
+    wheel(container, -600);
+    wheel(container, 5000);
+    expect(canvas(container).getAttribute('viewBox')).toBe(fit);
+    expect(canvas(container).getAttribute('data-zoomed')).toBeNull();
+  });
+
+  it('follows the pointer when a drag moves a window that was zoomed', () => {
+    const { container } = render(<ScopeCanvas layout={layout} />);
+    wheel(container, -600);
+    const before = shown(container);
+    drag(container, [200, 200], [150, 200]);
+    const after = shown(container);
+    // Left is towards the right of the picture: the picture follows the hand.
+    expect(after[0]).toBeCloseTo(before[0] + 50);
+    expect(after[2]).toBeCloseTo(before[2]);
+  });
+
+  it('stops the window at the edge of the picture', () => {
+    const { container } = render(<ScopeCanvas layout={layout} />);
+    wheel(container, -1600);
+    drag(container, [300, 300], [0, 300]);
+    const after = shown(container);
+    expect(after[0] + after[2]).toBeCloseTo(layout.width);
+  });
+
+  // At fit there is nothing past the edge to go and look at, so a press is a click
+  // on the box under it and nothing else.
+  it('does not move a picture that is already whole', () => {
+    const { container } = render(<ScopeCanvas layout={layout} />);
+    drag(container, [200, 200], [40, 40]);
+    expect(canvas(container).getAttribute('viewBox')).toBe(fit);
+  });
+
+  it('does not take a pan for a click on the box it started on', () => {
+    const onOpen = vi.fn();
+    const { container } = render(<ScopeCanvas layout={layout} onOpen={onOpen} />);
+    wheel(container, -600);
+    const box = screen.getByRole('button', { name: 'orders.web' });
+    fireEvent.pointerDown(box, { pointerId: 1, button: 0, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(canvas(container), { pointerId: 1, clientX: 60, clientY: 100 });
+    fireEvent.pointerUp(canvas(container), { pointerId: 1, clientX: 60, clientY: 100 });
+    fireEvent.click(box);
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it('still opens a box on a press that did not move', () => {
+    const onOpen = vi.fn();
+    const { container } = render(<ScopeCanvas layout={layout} onOpen={onOpen} />);
+    wheel(container, -600);
+    const box = screen.getByRole('button', { name: 'orders.web' });
+    fireEvent.pointerDown(box, { pointerId: 1, button: 0, clientX: 100, clientY: 100 });
+    fireEvent.pointerUp(box, { pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.click(box);
+    expect(onOpen).toHaveBeenCalledWith('orders.web');
+  });
+
+  it('goes back to the whole picture on a double click', () => {
+    const { container } = render(<ScopeCanvas layout={layout} />);
+    wheel(container, -600);
+    fireEvent.doubleClick(canvas(container));
+    expect(canvas(container).getAttribute('viewBox')).toBe(fit);
+  });
+});
