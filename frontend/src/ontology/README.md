@@ -75,6 +75,27 @@ back to being a caption. A model written before relations could declare
 attributes still reads its trigger from the label; that fallback is one expression
 in `expand.ts`, so it goes in a single commit once those models are migrated.
 
+## What a trigger rules out
+
+An event names what the machine waits for, and a machine is in one state at a
+time. Two transitions that leave the same state on the same event *and* the same
+guard therefore leave the next state undecided, which is an error rather than a
+choice left to the reader:
+
+- `duplicate-trigger` — the same event leaves one state twice (same guard, or
+  neither). Two different guards make it legitimate: the event arrives and the
+  guard picks.
+- `many-defaults` — two transitions without a trigger leave the same state with
+  different guards. Nothing evaluates a guard, so nothing can pick.
+
+One transition without a trigger per state is the default: what the machine does
+when no named event arrives. That is the slot the `entry`/`exit` notation will be
+lowered onto, which is why it is allowed exactly once.
+
+Both checks belong here and not in `src/engine/`: "in one state at a time" is what
+a state machine means, not what a typed graph means. The engine checks that a
+trigger is a string; this file checks what the string rules out.
+
 ## Known gaps
 
 - **No composite states.** A machine is flat. Nesting means an `owns` edge from
@@ -83,6 +104,9 @@ in `expand.ts`, so it goes in a single commit once those models are migrated.
 - **No reachability check.** `expandMachine` reports a missing initial state, but
   not a state no transition can reach. The engine already has `reachableFrom`;
   wiring it in is a few lines once a view wants to show it.
+- **Guard overlap is not checked.** Two guards on the same event are accepted,
+  and whether both can hold at once is never asked: a guard is a name, and
+  deciding that needs the requirement predicates the model does not carry yet.
 - **`layer` is a closed list, not an order.** `values: LAYERS` checks the word,
   not that a `presentation` module may only depend on `application`. Layer
   ordering is a relation between types, which the metamodel cannot express yet.
@@ -91,4 +115,4 @@ in `expand.ts`, so it goes in a single commit once those models are migrated.
 
 `architecture.ts` is data and can be read top to bottom. `expand.ts` is the only
 place with logic, and its shape is: collect the chain, flatten the states, resolve
-the transitions.
+the transitions, then check that leaving each state is decidable.

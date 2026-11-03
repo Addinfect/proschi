@@ -315,3 +315,118 @@ describe('transition triggers', () => {
   });
 });
 
+describe('what a trigger rules out', () => {
+  /** A machine with three states: a test adds only the transitions it is about. */
+  function machineWith(...transitions: Graph['edges']): Graph {
+    return {
+      nodes: [
+        { id: 'machine', type: MACHINE, attributes: { layer: 'presentation' } },
+        { id: 'a', type: STATE },
+        { id: 'b', type: STATE },
+        { id: 'c', type: STATE },
+      ],
+      edges: [
+        { id: 'machine-owns-a', relation: OWNS, source: 'machine', target: 'a' },
+        { id: 'machine-owns-b', relation: OWNS, source: 'machine', target: 'b' },
+        { id: 'machine-owns-c', relation: OWNS, source: 'machine', target: 'c' },
+        { id: 'machine-starts', relation: STARTS_AT, source: 'machine', target: 'a' },
+        ...transitions,
+      ],
+    };
+  }
+
+  /** Every code an expansion reports, with the subject it names. */
+  function issuesOf(graphed: Graph): string[] {
+    return expandMachine(graphed, 'machine').issues.map(
+      (issue) => `${issue.code}@${issue.subject ?? ''}`,
+    );
+  }
+
+  it('reports one event leading out of a state twice', () => {
+    const graphed = machineWith(
+      { id: 'a-to-b', relation: MOVES_TO, source: 'a', target: 'b', attributes: { [TRIGGER]: 'go' } },
+      { id: 'a-to-c', relation: MOVES_TO, source: 'a', target: 'c', attributes: { [TRIGGER]: 'go' } },
+    );
+    expect(issuesOf(graphed)).toEqual(['duplicate-trigger@a']);
+    expect(expandMachine(graphed, 'machine').issues[0]?.message).toBe(
+      '"a" leaves on "go" more than once (a-to-b, a-to-c), so which state it enters is undecided.',
+    );
+  });
+
+  it('allows one event with two guards, because guards are names not expressions', () => {
+    const graphed = machineWith(
+      {
+        id: 'a-to-b',
+        relation: MOVES_TO,
+        source: 'a',
+        target: 'b',
+        attributes: { [TRIGGER]: 'go', [GUARD]: 'ready' },
+      },
+      {
+        id: 'a-to-c',
+        relation: MOVES_TO,
+        source: 'a',
+        target: 'c',
+        attributes: { [TRIGGER]: 'go', [GUARD]: 'busy' },
+      },
+    );
+    expect(issuesOf(graphed)).toEqual([]);
+  });
+
+  it('reports the same event and the same guard twice as one mistake', () => {
+    const graphed = machineWith(
+      {
+        id: 'a-to-b',
+        relation: MOVES_TO,
+        source: 'a',
+        target: 'b',
+        attributes: { [TRIGGER]: 'go', [GUARD]: 'ready' },
+      },
+      {
+        id: 'a-to-c',
+        relation: MOVES_TO,
+        source: 'a',
+        target: 'c',
+        attributes: { [TRIGGER]: 'go', [GUARD]: 'ready' },
+      },
+    );
+    expect(issuesOf(graphed)).toEqual(['duplicate-trigger@a']);
+  });
+
+  it('accepts one untriggered transition next to named events', () => {
+    const graphed = machineWith(
+      { id: 'a-to-b', relation: MOVES_TO, source: 'a', target: 'b', attributes: { [TRIGGER]: 'go' } },
+      { id: 'a-to-c', relation: MOVES_TO, source: 'a', target: 'c' },
+    );
+    expect(issuesOf(graphed)).toEqual([]);
+  });
+
+  it('reports two transitions that both fire by themselves with different guards', () => {
+    const graphed = machineWith(
+      {
+        id: 'a-to-b',
+        relation: MOVES_TO,
+        source: 'a',
+        target: 'b',
+        attributes: { [GUARD]: 'ready' },
+      },
+      {
+        id: 'a-to-c',
+        relation: MOVES_TO,
+        source: 'a',
+        target: 'c',
+        attributes: { [GUARD]: 'busy' },
+      },
+    );
+    expect(issuesOf(graphed)).toEqual(['many-defaults@a']);
+  });
+
+  it('reports two bare defaults once, not as two different mistakes', () => {
+    const graphed = machineWith(
+      { id: 'a-to-b', relation: MOVES_TO, source: 'a', target: 'b' },
+      { id: 'a-to-c', relation: MOVES_TO, source: 'a', target: 'c' },
+    );
+    expect(issuesOf(graphed)).toEqual(['duplicate-trigger@a']);
+  });
+});
+

@@ -258,6 +258,57 @@ export function expandMachine(graph: Graph, machine: Id): MachineView {
     });
   }
 
+  // A trigger names an event, and a machine is in one state at a time: two
+  // transitions that leave the same state on the same event and the same guard
+  // leave the next state undecided. Guards are names, not expressions, so this
+  // compares them as text and says nothing about whether two different guards
+  // could both hold -- that needs the requirements, not the diagram.
+  const byFire = new Map<string, { first: TransitionView; ids: Id[] }>();
+  for (const transition of transitions) {
+    const key = [transition.from, transition.trigger ?? '', transition.guard ?? ''].join('\u0000');
+    const seen = byFire.get(key);
+    if (seen) seen.ids.push(transition.id);
+    else byFire.set(key, { first: transition, ids: [transition.id] });
+  }
+  for (const { first, ids } of byFire.values()) {
+    if (ids.length < 2) continue;
+    const when =
+      first.trigger === undefined
+        ? 'by itself'
+        : `on "${first.trigger}"${first.guard === undefined ? '' : ` while "${first.guard}" holds`}`;
+    issues.push({
+      severity: 'error',
+      code: 'duplicate-trigger',
+      subject: first.from,
+      message: `"${first.from}" leaves ${when} more than once (${ids.join(', ')}), so which state it enters is undecided.`,
+    });
+  }
+
+  // One transition without a trigger per state is the default: what the machine
+  // does when no named event arrives. Two of them are two answers to the same
+  // question, and their guards are names -- so nothing can pick between them.
+  const defaults = new Map<Id, { ids: Id[]; guards: Set<string> }>();
+  for (const transition of transitions) {
+    if (transition.trigger !== undefined) continue;
+    const seen = defaults.get(transition.from);
+    if (seen) {
+      seen.ids.push(transition.id);
+      seen.guards.add(transition.guard ?? '');
+    } else {
+      defaults.set(transition.from, { ids: [transition.id], guards: new Set([transition.guard ?? '']) });
+    }
+  }
+  for (const [from, { ids, guards }] of defaults) {
+    // Two defaults with the same guard are one mistake, already reported above.
+    if (ids.length < 2 || guards.size < 2) continue;
+    issues.push({
+      severity: 'error',
+      code: 'many-defaults',
+      subject: from,
+      message: `"${from}" leaves by itself ${ids.length} times (${ids.join(', ')}) and their guards are names, so which one fires cannot be decided.`,
+    });
+  }
+
   // The nearest machine in the chain that says where to start decides.
   let declaredStart: Id | undefined;
   for (const owner of chain) {

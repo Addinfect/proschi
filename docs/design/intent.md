@@ -170,9 +170,12 @@ which is cheaper than a human writing predicates.
 
 ## 8. Order of work
 
-1. **Edge attributes in `RelationSpec`** — triggers, guards and effects become
-   data. Everything else is blocked on this; the label convention was fine for
-   drawing and is not fine for checking.
+1. ~~**Edge attributes in `RelationSpec`**~~ — done. Triggers and guards are
+   attributes on `moves-to`, and the checks that makes possible are in
+   `expand.ts`: `duplicate-trigger` (one event leaves a state twice) and
+   `many-defaults` (two transitions without a trigger under different guards).
+   Both are machine semantics, so they stay out of `src/engine/`. What is left of
+   this step is guard *overlap*, which needs predicates and is parked with them (§9).
 2. **`entry` / `do` / `exit` lowered onto state attributes** (§4), plus the
    path-dependent analysis and the three-outcome check.
 3. **Composite and orthogonal states** (§5), emergency stop as the test case.
