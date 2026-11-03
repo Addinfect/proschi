@@ -35,7 +35,7 @@ export default function Spike() {
 
   return (
     <main className="min-h-screen bg-paper px-6 py-10 font-mono text-ink">
-      <div className="mx-auto flex max-w-3xl flex-col gap-6">
+      <div className="mx-auto flex max-w-6xl flex-col gap-6">
         <header className="flex flex-col gap-2">
           <p className="text-xs tracking-wide text-muted uppercase">SEAL · views · spike</p>
           <Breadcrumb opened={opened} onOpen={(depth) => setOpened(opened.slice(0, depth))} />

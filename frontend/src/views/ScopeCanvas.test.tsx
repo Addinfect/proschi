@@ -47,6 +47,32 @@ const view: ScopeView = {
 
 const layout = layoutScope(view);
 
+// A level that is nothing like 16:10: four boxes, one below the other. The window's
+// own shape has to show here, or it is not the window's shape at all.
+const tall = layoutScope({
+  boxes: [
+    { id: 'chain.start', children: [] },
+    { id: 'chain.next', children: [] },
+    { id: 'chain.again', children: [] },
+    { id: 'chain.last', children: [] },
+  ],
+  edges: [
+    { relation: 'uses', from: 'chain.start', to: 'chain.next', count: 1, members: ['c1'], crosses: false },
+    { relation: 'uses', from: 'chain.next', to: 'chain.again', count: 1, members: ['c2'], crosses: false },
+    { relation: 'uses', from: 'chain.again', to: 'chain.last', count: 1, members: ['c3'], crosses: false },
+  ],
+  issues: [],
+});
+
+const canvas = (container: HTMLElement): Element => {
+  const svg = container.querySelector('[data-scope-canvas]');
+  if (svg === null) throw new Error('no canvas');
+  return svg;
+};
+
+const shown = (container: HTMLElement): readonly number[] =>
+  (canvas(container).getAttribute('viewBox') ?? '').split(' ').map(Number);
+
 describe('ScopeCanvas', () => {
   it('draws one group per box and a frame around an opened node', () => {
     const { container } = render(<ScopeCanvas layout={layout} />);
@@ -71,10 +97,28 @@ describe('ScopeCanvas', () => {
     expect(screen.getByText('depends-on')).toBeTruthy();
   });
 
-  it('leaves the canvas the size the layout asked for', () => {
-    const { container } = render(<ScopeCanvas layout={layout} />);
-    const svg = container.querySelector('[data-scope-canvas]');
-    expect(svg?.getAttribute('viewBox')).toBe(`0 0 ${layout.width} ${layout.height}`);
+  // The window has a shape of its own, so a level that is taller than it is wide does
+  // not resize the page under the reader. The picture is centred in it, and the room
+  // left over is the same on both sides.
+  it('gives the picture a window of its own, not a shrink-wrap', () => {
+    const { container } = render(<ScopeCanvas layout={tall} />);
+    const [x, y, w, h] = shown(container);
+    expect(w / h).toBeCloseTo(1.6);
+    expect(w).toBeGreaterThan(tall.width);
+    expect(h).toBeCloseTo(tall.height);
+    expect(2 * x + w).toBeCloseTo(tall.width);
+    expect(2 * y + h).toBeCloseTo(tall.height);
+  });
+
+  it('lets the host name the shape of the window', () => {
+    const ratio = tall.width / tall.height;
+    const { container } = render(<ScopeCanvas layout={tall} shape={ratio} />);
+    const [x, y, w, h] = shown(container);
+    expect(w / h).toBeCloseTo(ratio);
+    expect(x).toBeCloseTo(0);
+    expect(y).toBeCloseTo(0);
+    expect(w).toBeCloseTo(tall.width);
+    expect(h).toBeCloseTo(tall.height);
   });
 
   it('opens a box that has something inside it, by click and by key', () => {
@@ -139,17 +183,6 @@ describe('ScopeCanvas', () => {
 // pointer pixel is one layout unit in these tests. That is the fallback the canvas
 // itself takes when it has not been laid out yet.
 describe('ScopeCanvas, moved', () => {
-  const fit = `0 0 ${layout.width} ${layout.height}`;
-
-  const canvas = (container: HTMLElement): Element => {
-    const svg = container.querySelector('[data-scope-canvas]');
-    if (svg === null) throw new Error('no canvas');
-    return svg;
-  };
-
-  const shown = (container: HTMLElement): readonly number[] =>
-    (canvas(container).getAttribute('viewBox') ?? '').split(' ').map(Number);
-
   const wheel = (container: HTMLElement, deltaY: number): void => {
     fireEvent.wheel(canvas(container), { deltaY });
   };
@@ -163,26 +196,32 @@ describe('ScopeCanvas, moved', () => {
 
   it('starts on the whole picture', () => {
     const { container } = render(<ScopeCanvas layout={layout} />);
-    expect(canvas(container).getAttribute('viewBox')).toBe(fit);
+    const [x, y, w, h] = shown(container);
     expect(canvas(container).getAttribute('data-zoomed')).toBeNull();
+    // Every edge of the picture is in the window, and none of them is in the middle.
+    expect(w).toBeGreaterThanOrEqual(layout.width);
+    expect(h).toBeGreaterThanOrEqual(layout.height);
+    expect(2 * x + w).toBeCloseTo(layout.width);
+    expect(2 * y + h).toBeCloseTo(layout.height);
   });
 
   it('closes the window on a wheel forward and keeps the proportions', () => {
     const { container } = render(<ScopeCanvas layout={layout} />);
+    const before = shown(container);
     wheel(container, -120);
     const after = shown(container);
-    expect(after[2]).toBeLessThan(layout.width);
-    // A window with its own proportions would stretch every box, and the layout
-    // decided the proportions.
-    expect(after[2] / after[3]).toBeCloseTo(layout.width / layout.height);
+    expect(after[2]).toBeLessThan(before[2]);
+    // Closing in must not stretch a single box: the window keeps its own shape.
+    expect(after[2] / after[3]).toBeCloseTo(before[2] / before[3]);
     expect(canvas(container).getAttribute('data-zoomed')).toBe('');
   });
 
   it('opens the window again, and no further than the whole picture', () => {
     const { container } = render(<ScopeCanvas layout={layout} />);
+    const whole = canvas(container).getAttribute('viewBox');
     wheel(container, -600);
     wheel(container, 5000);
-    expect(canvas(container).getAttribute('viewBox')).toBe(fit);
+    expect(canvas(container).getAttribute('viewBox')).toBe(whole);
     expect(canvas(container).getAttribute('data-zoomed')).toBeNull();
   });
 
@@ -209,8 +248,9 @@ describe('ScopeCanvas, moved', () => {
   // on the box under it and nothing else.
   it('does not move a picture that is already whole', () => {
     const { container } = render(<ScopeCanvas layout={layout} />);
+    const whole = canvas(container).getAttribute('viewBox');
     drag(container, [200, 200], [40, 40]);
-    expect(canvas(container).getAttribute('viewBox')).toBe(fit);
+    expect(canvas(container).getAttribute('viewBox')).toBe(whole);
   });
 
   it('does not take a pan for a click on the box it started on', () => {
@@ -238,8 +278,10 @@ describe('ScopeCanvas, moved', () => {
 
   it('goes back to the whole picture on a double click', () => {
     const { container } = render(<ScopeCanvas layout={layout} />);
+    const whole = canvas(container).getAttribute('viewBox');
     wheel(container, -600);
+    expect(canvas(container).getAttribute('viewBox')).not.toBe(whole);
     fireEvent.doubleClick(canvas(container));
-    expect(canvas(container).getAttribute('viewBox')).toBe(fit);
+    expect(canvas(container).getAttribute('viewBox')).toBe(whole);
   });
 });

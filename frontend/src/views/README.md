@@ -147,8 +147,14 @@ Three decisions worth naming:
 
 A level can be bigger than the space it is drawn in, so the canvas has a camera:
 three numbers on the `viewBox` (`x`, `y`, and how much of the picture's width is
-shown; the height follows, because a window with its own proportions would stretch
-every box).
+shown) and a fourth that follows -- not from the picture, but from the window.
+
+That shape is the window's own: `shape`, width over height, 16:10 unless the host
+names another. A `<svg>` that took the proportions of whatever level it held would
+grow and shrink with every level and move the page under the reader; a window keeps
+its size and the picture moves inside it. So the fit is the whole picture, centred,
+and the room left over is split evenly between the two sides. A host that wants the
+shrink-wrap back passes `shape={layout.width / layout.height}`.
 
 | Gesture | What it does |
 | --- | --- |
@@ -158,9 +164,11 @@ every box).
 
 Four rules make it behave without a library:
 
-- **The camera cannot leave the picture.** It is clamped to the edges and to at most
-  `MAX_ZOOM` times the fit, which is why zooming out of a corner lands on the whole
-  picture without being told to.
+- **The camera cannot leave the picture.** It is clamped to the edges, to the fit
+  (centred: a window with room to spare has equal margins, not one wide and one thin)
+  and to at most `MAX_ZOOM` times in. Further out than the fit there is nothing to
+  look at, so zooming out of a corner lands on the whole picture without being told
+  to.
 - **A drag is not a click.** A press that wanders more than `DRAG_SLOP` pans, and the
   click that follows is swallowed in the capture phase — otherwise the box the pan
   started on would open. Pointer capture is taken only once it *is* a pan, for the

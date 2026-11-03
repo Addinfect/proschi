@@ -25,6 +25,11 @@ import type { LayoutBox, LayoutEdge, ScopeLayout } from './layout';
  * back to the whole picture on a double click. Nothing below this line knows about
  * any of that, because a camera only shows a part of the same drawing -- it never
  * changes which drawing it is, and it never moves a box.
+ *
+ * The window has a shape of its own (`shape`), and that is what makes it a window:
+ * a `<svg>` that took the proportions of whatever level it held would grow and
+ * shrink with every level and move the page under the reader. The picture moves
+ * inside it instead.
  */
 
 export interface ScopeCanvasProps {
@@ -37,6 +42,14 @@ export interface ScopeCanvasProps {
   readonly selected?: Id;
   /** The picture's accessible name. Without one it is decoration. */
   readonly label?: string;
+  /**
+   * The window's shape: its width over its height. Absent, 16:10.
+   *
+   * Pass the picture's own proportions (`layout.width / layout.height`) to get a
+   * shrink-wrap instead -- what a level of one row wants, and what nothing with a
+   * rank structure does.
+   */
+  readonly shape?: number;
   readonly className?: string;
 }
 
@@ -53,11 +66,21 @@ const MAX_ZOOM = 8;
 const ZOOM_RATE = 0.0015;
 
 /**
+ * The window's shape -- width over height -- when the host names none.
+ *
+ * Fixed, and deliberately not the picture's. A slice of ink is easier to read in a
+ * window with room than in a shrink-wrap of the ink, and the room is the point of
+ * being able to zoom at all.
+ */
+const SHAPE = 16 / 10;
+
+/**
  * Where the window onto the picture sits: its left and top edge, and how much of
  * the picture's width it shows.
  *
- * The height is derived, never stored. `layoutScope` decided the proportions, and
- * a window whose own proportions drifted from them would stretch every box.
+ * The height is derived from the window's shape, never stored. `viewBox` and window
+ * then have the same proportions, so no box is ever stretched -- and the `<svg>`
+ * keeps its size on the page while the picture moves inside it.
  */
 interface Camera {
   readonly x: number;
@@ -80,11 +103,13 @@ export default function ScopeCanvas({
   onSelect,
   selected,
   label,
+  shape,
   className,
 }: ScopeCanvasProps) {
+  const aspect = shape ?? SHAPE;
   const frame = layout.frame;
   const svg = useRef<SVGSVGElement | null>(null);
-  const [view, setView] = useState<Camera>(() => fit(layout));
+  const [view, setView] = useState<Camera>(() => fit(layout, aspect));
   const [seen, setSeen] = useState<ScopeLayout>(layout);
   // Another level is another picture, and a window onto the old one means nothing
   // on it: back to fit. Adjusting state while rendering is deliberate -- the
@@ -92,10 +117,10 @@ export default function ScopeCanvas({
   // no longer there.
   if (seen !== layout) {
     setSeen(layout);
-    setView(fit(layout));
+    setView(fit(layout, aspect));
   }
-  const height = heightOf(layout, view);
-  const zoomed = view.w < layout.width;
+  const height = view.w / aspect;
+  const zoomed = view.w < whole(layout, aspect);
   const drag = useRef<Drag | undefined>(undefined);
   const swallow = useRef(false);
 
@@ -107,11 +132,11 @@ export default function ScopeCanvas({
     const onWheel = (event: WheelEvent): void => {
       event.preventDefault();
       const box = element.getBoundingClientRect();
-      setView((current) => zoom(layout, current, event, box));
+      setView((current) => zoom(layout, aspect, current, event, box));
     };
     element.addEventListener('wheel', onWheel, { passive: false });
     return () => element.removeEventListener('wheel', onWheel);
-  }, [layout]);
+  }, [layout, aspect]);
 
   const onPointerDown = (event: PointerEvent<SVGSVGElement>): void => {
     // Only the first button pans, and only when something is out of sight: at fit
@@ -142,7 +167,7 @@ export default function ScopeCanvas({
     const box = event.currentTarget.getBoundingClientRect();
     // Unmeasured -- a test, or a picture not laid out yet -- a pixel is a unit.
     const per = box.width > 0 ? start.view.w / box.width : 1;
-    setView(clamp(layout, { w: start.view.w, x: start.view.x - dx * per, y: start.view.y - dy * per }));
+    setView(clamp(layout, aspect, { w: start.view.w, x: start.view.x - dx * per, y: start.view.y - dy * per }));
   };
 
   const endDrag = (event: PointerEvent<SVGSVGElement>): void => {
@@ -187,7 +212,7 @@ export default function ScopeCanvas({
       onClickCapture={onCaptureClick}
       // Back to the whole picture. The way out of a corner, and the only one.
       onDoubleClick={() => {
-        if (zoomed) setView(fit(layout));
+        if (zoomed) setView(fit(layout, aspect));
       }}
     >
       {frame !== undefined && (
@@ -327,51 +352,61 @@ function cx(...parts: readonly (string | false | undefined)[]): string {
   return parts.filter((part) => typeof part === 'string' && part !== '').join(' ');
 }
 
-/** The whole picture, which is where every level starts. */
-function fit(layout: ScopeLayout): Camera {
-  return { x: 0, y: 0, w: layout.width };
+/**
+ * How wide a window has to be to hold the whole picture at the given shape.
+ *
+ * Wider than the picture or taller than it, whichever it takes: the whole picture
+ * fits, and the window may end up with margins on one axis. That is the fit, and it
+ * is also the widest the camera ever gets -- there is nothing out there.
+ */
+function whole(layout: ScopeLayout, shape: number): number {
+  return Math.max(layout.width, layout.height * shape);
 }
 
-function heightOf(layout: ScopeLayout, camera: Camera): number {
-  return layout.width > 0 ? (camera.w * layout.height) / layout.width : 0;
+/** The whole picture, centred in a window of the given shape: every level starts here. */
+function fit(layout: ScopeLayout, shape: number): Camera {
+  const w = whole(layout, shape);
+  return { x: (layout.width - w) / 2, y: (layout.height - w / shape) / 2, w };
 }
 
 /**
  * The camera, put back inside the picture.
  *
- * Never wider than the fit, never closer than `MAX_ZOOM`, never past an edge. The
- * last rule is the useful one: since the window can never reach past the picture,
- * zooming out of a corner arrives at the whole picture without anyone telling it
- * to, and a drag stops where the ink stops.
+ * Never wider than the fit, never closer than `MAX_ZOOM` times in, never past an
+ * edge. Centring counts as inside: a window with room to spare may have margins,
+ * but only equal ones. That is also why zooming out of a corner arrives at the whole
+ * picture without anyone telling it to, and a drag stops where the ink stops.
  */
-function clamp(layout: ScopeLayout, camera: Camera): Camera {
-  if (layout.width <= 0 || layout.height <= 0) return fit(layout);
-  const w = Math.min(Math.max(camera.w, layout.width / MAX_ZOOM), layout.width);
-  const h = heightOf(layout, { ...camera, w });
-  const x = Math.min(Math.max(camera.x, 0), layout.width - w);
-  const y = Math.min(Math.max(camera.y, 0), layout.height - h);
+function clamp(layout: ScopeLayout, shape: number, camera: Camera): Camera {
+  if (layout.width <= 0 || layout.height <= 0) return fit(layout, shape);
+  const fitWidth = whole(layout, shape);
+  const w = Math.min(Math.max(camera.w, fitWidth / MAX_ZOOM), fitWidth);
+  const x = slide(camera.x, w, layout.width);
+  const y = slide(camera.y, w / shape, layout.height);
   return w === camera.w && x === camera.x && y === camera.y ? camera : { x, y, w };
+}
+
+/** One axis of the clamp: centred when the window is the wider one, slid when it is not. */
+function slide(at: number, size: number, of: number): number {
+  return size >= of ? (of - size) / 2 : Math.min(Math.max(at, 0), of - size);
 }
 
 /**
  * One turn of the wheel, about the point under the pointer: that point stays where
  * it is, which is the only thing that makes zooming feel like it is not a jump.
  */
-function zoom(layout: ScopeLayout, camera: Camera, event: WheelEvent, box: DOMRect): Camera {
+function zoom(layout: ScopeLayout, shape: number, camera: Camera, event: WheelEvent, box: DOMRect): Camera {
   // A wheel that counts lines rather than pixels (Firefox, some drivers).
   const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
-  const h = heightOf(layout, camera);
+  const h = camera.w / shape;
   if (delta === 0 || camera.w <= 0 || h <= 0) return camera;
   const w = camera.w / Math.exp(-delta * ZOOM_RATE);
+  const ratio = w / camera.w;
   // The point under the pointer, in picture units -- or the middle of the window,
   // when the element has not been measured.
   const fx = box.width > 0 ? camera.x + ((event.clientX - box.left) / box.width) * camera.w : camera.x + camera.w / 2;
   const fy = box.height > 0 ? camera.y + ((event.clientY - box.top) / box.height) * h : camera.y + h / 2;
-  return clamp(layout, {
-    w,
-    x: fx - ((fx - camera.x) * w) / camera.w,
-    y: fy - ((fy - camera.y) * (w / camera.w)),
-  });
+  return clamp(layout, shape, { w, x: fx - (fx - camera.x) * ratio, y: fy - (fy - camera.y) * ratio });
 }
 
 /** `viewBox` is text, and two decimals is well under a pixel at any zoom worth having. */
