@@ -57,7 +57,7 @@ how the arrows run, as numbers.
 const layout = layoutScope(readScope(graph, spec), { labelOf: (id) => nameOf[id] });
 // layout.frame?  {x, y, width, height}   the opened node, drawn around the level
 // layout.boxes[] {id, label, x, y, width, height, children}
-// layout.edges[] {relation, from, to, kind, count, members, crosses, path: Point[], label: Point}
+// layout.edges[] {relation, from, to, kind, count, members, crosses, head, path: Point[], label: Point}
 // layout.width, layout.height            the canvas
 ```
 
@@ -73,7 +73,7 @@ Four routes, and `kind` says which one an arrow got:
 | `forward` | to a lower rank | out of the bottom, into the top, one elbow |
 | `back` | to the same or a higher rank | around the left of both boxes |
 | `self` | both ends on one box | a loop on its right edge |
-| `cross` | an end is outside the scope | a stub on the frame of the opened node |
+| `cross` | an end is outside the scope | through the wall of the opened node, and out |
 
 Two things this deliberately does not do. It does not measure text — a box widens
 with its label by an approximation (`charWidth`), because measuring needs a DOM and
@@ -82,9 +82,20 @@ that would put the layout in the browser. And it does not avoid crossings: a
 `back` edge, so a broken model still produces a finite picture. The checker has
 already said the model is broken; this only refuses to hang on it.
 
-A level that was opened is framed, and the frame is where a `cross` edge stops —
-which is what `crosses` means: the rest of the edge is behind the frame, one click
+A level that was opened is framed, and a `cross` edge runs *through* the wall and
+stops outside it: the frame is a boundary, not a destination, and a line that ends
+on it would say the opposite. That is why an arrow carries `head`: only an end that
+lands on a box gets a point. The rest of the edge is behind the frame, one click
 away, not lost.
+
+Arrows do not share an anchor. Two relations leaving one box used to start on the
+same pixel and read as one line that forks; each end is now spread evenly along the
+side it uses, and a side with a single arrow keeps the middle.
+
+Neither do they share a lane. Arrows crossing the same gap each get a horizontal line
+of their own, seated in the order they land so the fan does not fold over itself, and
+the gap grows when more arrows need it than the default one can seat. One line for
+three relations put three counts on one pixel.
 
 ## `ink.ts`
 

@@ -114,6 +114,16 @@ describe('ScopeCanvas', () => {
     expect(screen.getByText(/…$/)).toBeTruthy();
   });
 
+  // The frame says "this is where the level ends" and nothing else, so it is
+  // solid. Dashes are kept for the one thing they mean here: the arrow carries on
+  // somewhere this level cannot show.
+  it('keeps the frame solid and dashes only the crossing arrow', () => {
+    const { container } = render(<ScopeCanvas layout={layout} />);
+    expect(container.querySelector('[data-frame] rect')?.getAttribute('stroke-dasharray')).toBeNull();
+    expect(container.querySelector('[data-kind="cross"] path')?.getAttribute('stroke-dasharray')).toBe('4 4');
+    expect(container.querySelector('[data-kind="forward"] path')?.getAttribute('stroke-dasharray')).toBeNull();
+  });
+
   it('lets a host mark a box without owning the drawing', () => {
     const { container } = render(<ScopeCanvas layout={layout} selected="orders.store" />);
     const marked = container.querySelectorAll('[data-marked]');

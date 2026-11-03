@@ -9,12 +9,13 @@ import { drawnPath, edgeText, fitLabel, headPath, membersText, pathData } from '
  * this file can check by eye: no rendering, no snapshot of a DOM.
  */
 
-function edge(path: Point[], kind: EdgeKind = 'forward', count = 1): LayoutEdge {
+function edge(path: Point[], kind: EdgeKind = 'forward', count = 1, head = true): LayoutEdge {
   return {
     relation: 'uses',
     from: 'a',
     to: 'b',
     kind,
+    head,
     count,
     members: ['a'],
     crosses: false,
@@ -75,6 +76,14 @@ describe('an arrow', () => {
     const stub = edge([{ x: 0, y: 0 }, { x: 4, y: 0 }], 'cross');
     expect(drawnPath(stub)).toBe('');
     expect(headPath(stub)).toBe('M 4 0 L 0 4 L 0 -4 Z');
+  });
+
+  it('draws no head when the arrow ends outside the scope, and keeps its whole line', () => {
+    // A crossing that leaves: the wall is a boundary, not a destination, so there
+    // is nothing to point at and nothing to stop short of.
+    const leaving = edge([{ x: 100, y: 100 }, { x: 100, y: 150 }], 'cross', 1, false);
+    expect(headPath(leaving)).toBe('');
+    expect(drawnPath(leaving)).toBe('M 100 100 L 100 150');
   });
 
   it('has no head when there is no line to put one on', () => {

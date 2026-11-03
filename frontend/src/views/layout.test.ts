@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Graph } from '../engine';
 import { readScope, type ScopeView } from './scope';
-import { layoutScope, type LayoutBox, type ScopeLayout } from './layout';
+import { layoutScope, type LayoutBox, type LayoutEdge, type ScopeLayout } from './layout';
 
 /**
  * Where the boxes go.
@@ -59,6 +59,11 @@ function edgeOf(layout: ScopeLayout, from: string, to: string) {
   return edge;
 }
 
+/** The two points an arrow really attaches to, whichever way it was routed. */
+function endsOf(edge: LayoutEdge) {
+  return { start: edge.path[0], end: edge.path[edge.path.length - 1] };
+}
+
 /** Top left corner of every box, in the order the model declares them. */
 function cornersOf(layout: ScopeLayout): string[] {
   return layout.boxes.map((box) => `${box.id} ${box.x},${box.y}`);
@@ -105,36 +110,91 @@ describe('a layout of one level', () => {
     }
   });
 
-  it('leaves every arrow from the bottom of its box and lands on the top of the other', () => {
+  it('leaves every arrow from the bottom of its box, and lands it on the top of the other', () => {
     const layout = lay();
     expect(layout.edges.length).toBe(4);
     for (const edge of layout.edges) {
       const from = boxOf(layout, edge.from);
       const to = boxOf(layout, edge.to);
+      const { start, end } = endsOf(edge);
       expect(edge.kind).toBe('forward');
-      expect(edge.path[0]).toEqual({ x: from.x + from.width / 2, y: from.y + from.height });
-      expect(edge.path[edge.path.length - 1]).toEqual({ x: to.x + to.width / 2, y: to.y });
+      expect(edge.head).toBe(true);
+      expect(start.y).toBe(from.y + from.height);
+      expect(start.x).toBeGreaterThanOrEqual(from.x);
+      expect(start.x).toBeLessThanOrEqual(from.x + from.width);
+      expect(end.y).toBe(to.y);
+      expect(end.x).toBeGreaterThanOrEqual(to.x);
+      expect(end.x).toBeLessThanOrEqual(to.x + to.width);
     }
   });
 
-  it('draws a shared column as one straight leg, not a zero width detour', () => {
+  it('gives every arrow on a shared side its own anchor, and a lone one the middle', () => {
     const layout = lay();
-    expect(edgeOf(layout, 'a', 'b').path).toEqual([
+    // Two arrows leave `a` and two land on `d`: neither pair may share a pixel, or
+    // a fan of relations reads as one line that forks halfway down.
+    expect(endsOf(edgeOf(layout, 'a', 'b')).start.x).not.toBe(endsOf(edgeOf(layout, 'a', 'c')).start.x);
+    expect(endsOf(edgeOf(layout, 'b', 'd')).end.x).not.toBe(endsOf(edgeOf(layout, 'c', 'd')).end.x);
+    // `b` is entered by one arrow only, and that one comes down its middle.
+    const b = boxOf(layout, 'b');
+    expect(endsOf(edgeOf(layout, 'a', 'b')).end).toEqual({ x: b.x + b.width / 2, y: b.y });
+  });
+
+  it('gives every arrow across one gap its own line, so two labels never share a pixel', () => {
+    // Three arrows out of one box and into one rank: one horizontal line each, at
+    // three different heights. Stacked on one pixel they read as a single arrow
+    // with three names written over it.
+    const graph: Graph = {
+      nodes: [
+        { id: 'hub', type: 'module' },
+        { id: 'left', type: 'module' },
+        { id: 'middle', type: 'module' },
+        { id: 'right', type: 'module' },
+      ],
+      edges: [
+        { id: 'hub-needs-left', relation: 'depends-on', source: 'hub', target: 'left' },
+        { id: 'hub-needs-middle', relation: 'depends-on', source: 'hub', target: 'middle' },
+        { id: 'hub-needs-right', relation: 'depends-on', source: 'hub', target: 'right' },
+      ],
+    };
+    const layout = lay(graph);
+    const hub = boxOf(layout, 'hub');
+    const lanes = ['left', 'middle', 'right'].map((to) => {
+      const edge = edgeOf(layout, 'hub', to);
+      // Its own height, and inside the gap: below the box it leaves, above the rank
+      // it lands on. Read off the label, not the path -- an arrow whose two ends line
+      // up is drawn as one straight leg, and its lane is then a point the polyline no
+      // longer carries.
+      expect(edge.label.y).toBeGreaterThan(hub.y + hub.height);
+      expect(edge.label.y).toBeLessThan(boxOf(layout, to).y);
+      return edge.label.y;
+    });
+    expect(new Set(lanes).size).toBe(3);
+    // In the order they land, left to right, so the fan does not cross itself.
+    expect(lanes[0]).toBeLessThan(lanes[1]);
+    expect(lanes[1]).toBeLessThan(lanes[2]);
+  });
+
+  it('draws a vertical pair as one straight leg, not a zero width detour', () => {
+    // One box above the other, one arrow: no reason to step sideways at all.
+    const graph: Graph = {
+      nodes: [
+        { id: 'a', type: 'module' },
+        { id: 'b', type: 'module' },
+      ],
+      edges: [{ id: 'a-needs-b', relation: 'depends-on', source: 'a', target: 'b' }],
+    };
+    expect(edgeOf(lay(graph), 'a', 'b').path).toEqual([
       { x: 88, y: 72 },
       { x: 88, y: 136 },
-    ]);
-    expect(edgeOf(layout, 'a', 'c').path).toEqual([
-      { x: 88, y: 72 },
-      { x: 88, y: 104 },
-      { x: 248, y: 104 },
-      { x: 248, y: 136 },
     ]);
   });
 
   it('puts the label on the longest leg, where nothing else is written', () => {
     const layout = lay();
-    expect(edgeOf(layout, 'a', 'c').label).toEqual({ x: 168, y: 104 });
-    expect(edgeOf(layout, 'b', 'd').label).toEqual({ x: 128, y: 216 });
+    // Half way between the ranks and between the two anchors: the leg across the
+    // gap is the long one, so the count sits on it.
+    expect(edgeOf(layout, 'a', 'c').label).toEqual({ x: 179, y: 115 });
+    expect(edgeOf(layout, 'b', 'd').label).toEqual({ x: 118, y: 205 });
   });
 
   it('keeps what a collapsed edge stood for', () => {
@@ -196,30 +256,44 @@ describe('a layout of an opened node', () => {
       expect(box.x + box.width).toBeLessThanOrEqual((frame?.x ?? 0) + (frame?.width ?? 0));
       expect(box.y + box.height).toBeLessThanOrEqual((frame?.y ?? 0) + (frame?.height ?? 0));
     }
+    // Room outside the wall on every side: an arrow crossing it has to be seen
+    // leaving, not be clipped by the edge of the picture.
+    expect(frame?.x).toBe(28);
+    expect(layout.width - ((frame?.x ?? 0) + (frame?.width ?? 0))).toBe(28);
+    expect(layout.height - ((frame?.y ?? 0) + (frame?.height ?? 0))).toBe(28);
   });
 
-  it('stops an arrow that leaves the scope at the frame, so it reads as a stub', () => {
+  it('runs an arrow that leaves the scope through the wall and out, with no head', () => {
     const layout = lay(nested, 'core');
     const out = edgeOf(layout, 'a', 'core');
+    const a = boxOf(layout, 'a');
+    const wall = (layout.frame?.y ?? 0) + (layout.frame?.height ?? 0);
+    const { start, end } = endsOf(out);
     expect(out.kind).toBe('cross');
     expect(out.crosses).toBe(true);
-    expect(out.path[out.path.length - 1]?.y).toBe(
-      (layout.frame?.y ?? 0) + (layout.frame?.height ?? 0),
-    );
+    // Nothing out there is a box, so nothing is pointed at.
+    expect(out.head).toBe(false);
+    expect(start.y).toBe(a.y + a.height);
+    // Past the wall, so the reader sees it leave -- and still inside the picture.
+    expect(end.y).toBeGreaterThan(wall);
+    expect(end.y).toBeLessThan(layout.height);
   });
 
-  it('brings an arrow in from outside down to the box it enters', () => {
+  it('brings an arrow in from outside the wall, and lands it on the box it enters', () => {
     const layout = lay(nested, 'core');
     const inbound = edgeOf(layout, 'core', 'b');
     const b = boxOf(layout, 'b');
+    const { start, end } = endsOf(inbound);
     expect(inbound.kind).toBe('cross');
     expect(inbound.crosses).toBe(true);
-    expect(inbound.path[0]?.y).toBe(layout.frame?.y);
-    expect(inbound.path[inbound.path.length - 1]).toEqual({ x: b.x + b.width / 2, y: b.y });
+    // It ends on a box, so it does point.
+    expect(inbound.head).toBe(true);
+    expect(start.y).toBeLessThan(layout.frame?.y ?? 0);
+    expect(end).toEqual({ x: b.x + b.width / 2, y: b.y });
   });
 
-  it('draws one stub when an arrow in the scope has no end in it', () => {
-    // `core` itself depending on something outside: both ends are the frame.
+  it('ticks through the wall when an arrow has no end at this level at all', () => {
+    // `core` itself depending on something outside: neither end is drawn here.
     const graph: Graph = {
       nodes: [...nested.nodes],
       edges: [
@@ -228,11 +302,13 @@ describe('a layout of an opened node', () => {
       ],
     };
     const layout = lay(graph, 'core');
-    const stub = edgeOf(layout, 'core', 'core');
-    expect(stub.kind).toBe('cross');
-    // Inside the canvas: a stub drawn outwards would be clipped by the frame.
-    expect(stub.path[0]?.y).toBe(layout.frame?.y);
-    expect(stub.path[1]?.y).toBe((layout.frame?.y ?? 0) + 16);
+    const tick = edgeOf(layout, 'core', 'core');
+    const wall = layout.frame?.y ?? 0;
+    expect(tick.kind).toBe('cross');
+    expect(tick.head).toBe(false);
+    // Through the wall, not merely up to it: outside first, then a little way in.
+    expect(tick.path[0].y).toBeLessThan(wall);
+    expect(tick.path[1].y).toBeGreaterThan(wall);
   });
 });
 

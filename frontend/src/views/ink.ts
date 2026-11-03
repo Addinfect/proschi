@@ -12,7 +12,8 @@ import type { LayoutEdge, Point } from './layout';
  * Two things get decided here that the layout could not:
  *
  * - the head is a filled triangle, so the line has to stop at its base, or the
- *   stroke pokes out past the point;
+ *   stroke pokes out past the point -- and an arrow that leaves the scope has no
+ *   head at all, so its line runs all the way to where it ends;
  * - a box has a width, and a label longer than that width has to be shortened,
  *   because a box that grows with its label would undo the ranks.
  *
@@ -53,18 +54,21 @@ export function pathData(points: readonly Point[]): string {
  * The arrow's line, stopped at the base of its head -- so the line does not run
  * out of the point. A leg shorter than the head is not drawn at all: the head
  * covers it end to end, and a line under a filled triangle only thickens it.
+ *
+ * An edge with no head keeps its whole path: there is nothing to stop short of.
  */
 export function drawnPath(edge: LayoutEdge, spec: InkSpec = {}): string {
   const head = spec.head ?? HEAD;
-  const base = headBase(edge.path, head);
-  return pathData(base);
+  return pathData(edge.head ? headBase(edge.path, head) : edge.path);
 }
 
 /**
  * The head: a filled triangle whose point is the last point of the path, turned
- * into the direction the last leg runs.
+ * into the direction the last leg runs. Nothing at all when the arrow does not
+ * end on a box -- a head is a claim about where the arrow goes.
  */
 export function headPath(edge: LayoutEdge, spec: InkSpec = {}): string {
+  if (!edge.head) return '';
   const head = spec.head ?? HEAD;
   const tip = edge.path.at(-1);
   const base = headBase(edge.path, head).at(-1);

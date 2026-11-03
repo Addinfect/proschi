@@ -59,10 +59,11 @@ export default function ScopeCanvas({
       {frame !== undefined && (
         <g data-frame={frame.id}>
           <title>{frame.label}</title>
+          {/* Solid and thin: the frame is a boundary, and nothing more. Dashes say
+              one thing only -- the arrow goes on where this level cannot show. */}
           <rect
             className="fill-none stroke-muted"
             strokeWidth={1}
-            strokeDasharray="6 4"
             x={frame.x}
             y={frame.y}
             width={frame.width}
