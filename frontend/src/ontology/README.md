@@ -196,6 +196,13 @@ three outcomes are the reason to write it down at all:
   output before the transition, so the value might be *nothing*.
 - `sets-contradicted` (error) — the assertion cannot hold on any path.
 
+When a claim holds on some paths only, the message names where each conflicting value
+came from. A value the crossing decides by itself — the successor's `entry`, or the
+`exit` the predecessor left behind — is the same on every path, so it is printed bare.
+A carried value names the transition that brought it, because that is the answer to
+"why is this not determined?", and naming the edge the reader is already looking at
+would answer nothing.
+
 `output-never-set` is the cheap companion warning: a machine declares an output
 and no state ever writes it, so it keeps whatever it held before the machine
 started. For a hardware model that silence usually means a state is missing.

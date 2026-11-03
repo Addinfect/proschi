@@ -185,7 +185,17 @@ export function readPaths(view: MachineView): PathsView {
     return transition?.trigger ?? id;
   };
 
-  /** The set of values one crossing delivers to one output. */
+  /**
+   * The set of values one crossing delivers to one output, each with the transition it
+   * came from.
+   *
+   * A value the crossing decides by itself -- the successor's `entry`, or the `exit`
+   * the predecessor left behind -- is the same on every path into this transition, so
+   * it carries no witness: naming a transition would add nothing to what the assertion
+   * already says. A *carried* value is the interesting one, because it is what makes
+   * the assertion depend on how the machine got here, and its witness is where it came
+   * from rather than this transition, which the reader is already looking at.
+   */
   const delivered = (transition: TransitionView, output: string): Map<Constant | undefined, Id | undefined> => {
     const result = new Map<Constant | undefined, Id | undefined>();
     const source = holds.get(transition.from);
@@ -194,9 +204,10 @@ export function readPaths(view: MachineView): PathsView {
     if (!inValues) return result;
     const written = entry.get(transition.to)?.get(output);
     const left = exit.get(transition.from)?.get(output);
-    for (const [value] of inValues) {
+    const decided = written !== undefined || left !== undefined;
+    for (const [value, via] of inValues) {
       const next = written !== undefined ? written : left !== undefined ? left : value;
-      if (!result.has(next)) result.set(next, next === undefined ? undefined : transition.id);
+      if (!result.has(next)) result.set(next, decided ? undefined : via);
     }
     return result;
   };
@@ -218,6 +229,8 @@ export function readPaths(view: MachineView): PathsView {
         continue;
       }
       if (values.size === 1 && values.has(assertion.value)) continue;
+      // The values the assertion does not allow, each named with where it came from
+      // when where it came from is the answer to "why is this not determined?".
       const others = [...values]
         .filter(([value]) => value !== assertion.value)
         .map(([value, via]) => (via === undefined ? show(value) : `${show(value)} (via "${fireOf(via)}")`))

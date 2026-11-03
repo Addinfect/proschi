@@ -163,6 +163,11 @@ function holdsOf(view: PathsView, state: string, output: string): readonly Possi
   );
 }
 
+/** Whether any path from the initial state arrives at a state. */
+function reached(view: PathsView, state: string): boolean {
+  return view.holds.find((held) => held.state === state)?.reachable ?? false;
+}
+
 /**
  * The same, written as `value via transition`, with the initial state marked `start`.
  * Sorted, so a test states what holds rather than the order the walk happened to find
@@ -261,15 +266,18 @@ describe('reading a path', () => {
   });
 
   it('says nothing about the values of a machine with no initial state', () => {
+    // `wait` does write the output on entry, and still holds nothing here: with no
+    // entry state there is no path, so the constant is one no state is ever in.
     const stray: Graph = {
       nodes: [
         { id: 'motor', type: MACHINE, attributes: { [OUTPUTS]: 'drive' } },
-        { id: 'wait', type: STATE },
+        { id: 'wait', type: STATE, attributes: { [ENTRY]: 'drive = 1' } },
       ],
       edges: [{ id: 'motor-owns-wait', relation: OWNS, source: 'motor', target: 'wait' }],
     };
     const view = pathsOf(stray);
     expect(holdsOf(view, 'wait', 'drive')).toEqual([]);
+    expect(reached(view, 'wait')).toBe(false);
     expect(codesOf(view)).toEqual([]);
   });
 
@@ -301,6 +309,8 @@ describe('checking what a transition asserts', () => {
     const view = pathsOf(asserting(carrying, 'wait-hold', 'drive = 0'));
     expect(codesOf(view)).toEqual(['sets-undecided']);
     expect(view.issues[0]?.severity).toBe('warning');
+    // The 1 was not made by this crossing, so the message names the transition it
+    // came from instead of the edge the reader is already looking at.
     expect(view.issues[0]?.message).toContain('1 (via "release")');
     expect(view.issues[0]?.message).toContain('nothing');
   });
