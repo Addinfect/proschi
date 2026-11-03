@@ -9,6 +9,7 @@ import {
 } from '../engine';
 import {
   ACTIVITY,
+  CONTAINS,
   ENTRY,
   EXIT,
   GUARD,
@@ -31,6 +32,16 @@ import {
  * A machine may `inherits` one other machine: it then has the inherited states
  * and transitions as well, and a state it declares with an `overrides` attribute
  * takes the place of the inherited state that attribute names.
+ *
+ * A state may hold states of its own (`contains`). Then the machine is never in the
+ * container as such -- it is in one of the states inside it, and the container is a
+ * level of the statechart rather than a state a view marks as current. Ownership
+ * does not change: a contained state is still owned by the same machine, and
+ * `contains` only says where inside it the state sits. Entering a container enters
+ * the state it says it starts in, a transition written on a container stands for one
+ * crossing from each state at the bottom of it, and the `entry` and `exit` of the
+ * states around a state still apply around it (see paths.ts for how a crossing
+ * reads).
  *
  * Overriding names an id rather than a name, because every node in a graph has a
  * unique id but need not have a unique name: a replacement is then something the
@@ -67,9 +78,15 @@ export interface StateView {
   declaredBy: Id;
   /** Id of the inherited state this one replaced, when it replaced one. */
   overrides?: Id;
-  /** Outputs the state sets on entering, in the order written. */
+  /** Id of the state this one sits inside; absent for a state the machine is in directly. */
+  parent?: Id;
+  /** Ids of the states directly inside this one, in declaration order; empty for a state the machine can be in. */
+  children: readonly Id[];
+  /** Ids of the states this one sits inside, outermost first; empty for a state at the top. */
+  ancestors: readonly Id[];
+  /** Outputs the state itself sets on entering, in the order written. The states around it write their own. */
   entry: readonly AssignmentView[];
-  /** Outputs the state sets on leaving, in the order written. */
+  /** Outputs the state itself sets on leaving, in the order written. */
   exit: readonly AssignmentView[];
   /** The activity that runs while the machine is held here, when one is named. */
   activity?: string;
@@ -79,10 +96,19 @@ export interface StateView {
 export interface TransitionView {
   /** Edge id. */
   id: Id;
-  /** State the machine leaves, after overrides. */
+  /** State the machine leaves, after overrides and after a container was read as the states at the bottom of it. */
   from: Id;
-  /** State the machine enters, after overrides. */
+  /** State the machine enters, after overrides and after entering a container was read as entering the state it starts in. */
   to: Id;
+  /**
+   * The state the edge was written on, when that state is a container and the edge
+   * therefore stands for one crossing from each state at the bottom of it; absent
+   * when the edge starts where it was written. The id stays the edge's, because the
+   * model wrote one edge.
+   */
+  declaredFrom?: Id;
+  /** The state the edge was written towards, when entering it was read as entering a state inside it. */
+  declaredTo?: Id;
   /** The event the transition waits for; absent on a transition that fires by itself. */
   trigger?: string;
   /** The condition that picks this transition among the ones leaving the same state. */
@@ -92,7 +118,11 @@ export interface TransitionView {
    * assertion, not a write: it changes nothing, it is checked (see paths.ts).
    */
   sets: readonly AssignmentView[];
-  /** True when an override moved one end of the transition onto a replacing state. */
+  /**
+   * True when an override moved one end of the transition onto a replacing state. A
+   * container that changed an end is not an override: it shows up in `declaredFrom`
+   * and `declaredTo` instead.
+   */
   retargeted: boolean;
 }
 
@@ -284,6 +314,135 @@ export function expandMachine(graph: Graph, machine: Id): MachineView {
     }
   }
 
+  const inForce = new Set(order);
+
+  // Which states hold which, read from `contains`. The relation allows one container
+  // per state and no cycle (see architecture.ts), so this is a tree; a graph that
+  // skipped that check is cut here rather than walked in circles.
+  const containerOf = new Map<Id, Id>();
+  const childrenOf = new Map<Id, Id[]>();
+  for (const edge of index.edges) {
+    if (edge.relation !== CONTAINS) continue;
+    const holder = resolve(edge.source);
+    const held = resolve(edge.target);
+    if (!inForce.has(holder) || !inForce.has(held)) continue;
+    const other = containerOf.get(held);
+    if (other !== undefined) {
+      issues.push({
+        severity: 'error',
+        code: 'many-parents',
+        subject: held,
+        message: `"${held}" is inside both "${other}" and "${holder}"; only "${other}" is used.`,
+      });
+      continue;
+    }
+    containerOf.set(held, holder);
+    const inside = childrenOf.get(holder);
+    if (inside) inside.push(held);
+    else childrenOf.set(holder, [held]);
+  }
+
+  /** The states directly inside one, in declaration order. */
+  const childrenIn = (id: Id): readonly Id[] => childrenOf.get(id) ?? [];
+
+  /** The states containing one, outermost first, the state itself last. */
+  const reportedCycle = new Set<Id>();
+  const chainTo = (id: Id): Id[] => {
+    const chain: Id[] = [id];
+    const walked = new Set<Id>([id]);
+    let at = containerOf.get(id);
+    while (at !== undefined) {
+      if (walked.has(at)) {
+        if (!reportedCycle.has(at)) {
+          reportedCycle.add(at);
+          issues.push({
+            severity: 'error',
+            code: 'contains-cycle',
+            subject: at,
+            message: `"${at}" is inside "${id}", which is inside it again, so the states of this machine do not form a tree. The hierarchy is cut there.`,
+          });
+        }
+        break;
+      }
+      walked.add(at);
+      chain.push(at);
+      at = containerOf.get(at);
+    }
+    return chain.reverse();
+  };
+
+  /** The states at the bottom of one: the only states the machine can be in. */
+  const leavesIn = (id: Id): Id[] => {
+    const leaves: Id[] = [];
+    const walked = new Set<Id>();
+    const open: Id[] = [id];
+    for (let at = 0; at < open.length; at += 1) {
+      const below = childrenIn(open[at]).filter((child) => !walked.has(child));
+      if (below.length === 0) {
+        leaves.push(open[at]);
+        continue;
+      }
+      for (const child of below) walked.add(child);
+      open.push(...below);
+    }
+    return leaves;
+  };
+
+  /**
+   * The state the machine is in once it has entered one: what a container says it
+   * starts in, followed down until a state holds nothing itself. A container that
+   * does not say is undecided, and so is one whose start leads back into it.
+   */
+  const enteredIn = (id: Id): Id | undefined => {
+    let at = id;
+    const walked = new Set<Id>([at]);
+    for (;;) {
+      if (childrenIn(at).length === 0) return at;
+      const named = successors(index, at, { relations: [STARTS_AT] })[0];
+      if (named === undefined) {
+        issues.push({
+          severity: 'error',
+          code: 'no-entry',
+          subject: at,
+          message: `"${at}" has states inside it and does not say which one it starts in, so which state the machine enters is undecided.`,
+        });
+        return undefined;
+      }
+      const next = resolve(named);
+      if (!chainTo(next).includes(at)) {
+        issues.push({
+          severity: 'error',
+          code: 'initial-unknown',
+          subject: at,
+          message: `"${at}" starts at "${next}", which is not one of the states inside it.`,
+        });
+        return undefined;
+      }
+      if (walked.has(next)) {
+        issues.push({
+          severity: 'error',
+          code: 'contains-cycle',
+          subject: at,
+          message: `"${at}" starts at "${next}", which leads back to it, so the state entered is undecided.`,
+        });
+        return undefined;
+      }
+      walked.add(next);
+      at = next;
+    }
+  };
+
+  // What each state itself writes, read once: a mistake is then reported once, and
+  // the pieces can be put in the order of a crossing afterwards (see paths.ts).
+  const ownEntry = new Map<Id, readonly AssignmentView[]>();
+  const ownExit = new Map<Id, readonly AssignmentView[]>();
+  for (const id of order) {
+    const state = nodes.get(id);
+    if (!state) continue;
+    ownEntry.set(id, parseEffects(textOf(state, ENTRY), 'entry', id, declaredOutput, issues));
+    ownExit.set(id, parseEffects(textOf(state, EXIT), 'exit', id, declaredOutput, issues));
+  }
+
   const states: StateView[] = [];
   for (const id of order) {
     const state = nodes.get(id);
@@ -295,28 +454,39 @@ export function expandMachine(graph: Graph, machine: Id): MachineView {
       final: state.attributes?.final === true,
       declaredBy: declaredBy.get(id) ?? machine,
       overrides: overrode.get(id),
-      entry: parseEffects(textOf(state, ENTRY), 'entry', id, declaredOutput, issues),
-      exit: parseEffects(textOf(state, EXIT), 'exit', id, declaredOutput, issues),
+      parent: containerOf.get(id),
+      children: childrenIn(id),
+      ancestors: chainTo(id).slice(0, -1),
+      entry: ownEntry.get(id) ?? [],
+      exit: ownExit.get(id) ?? [],
       activity: textOf(state, ACTIVITY),
     });
   }
 
-  const inForce = new Set(order);
   const transitions: TransitionView[] = [];
   for (const edge of index.edges) {
     if (edge.relation !== MOVES_TO) continue;
-    const from = resolve(edge.source);
-    const to = resolve(edge.target);
-    if (!inForce.has(from) || !inForce.has(to)) continue;
-    transitions.push({
-      id: edge.id,
-      from,
-      to,
-      trigger: textOf(edge, TRIGGER) ?? edge.label,
-      guard: textOf(edge, GUARD),
-      sets: parseEffects(textOf(edge, SETS), 'sets', edge.id, declaredOutput, issues),
-      retargeted: from !== edge.source || to !== edge.target,
-    });
+    const source = resolve(edge.source);
+    const target = resolve(edge.target);
+    if (!inForce.has(source) || !inForce.has(target)) continue;
+    // Read the assertion once per edge: a container turns one edge into several
+    // crossings, and they all assert the same thing.
+    const sets = parseEffects(textOf(edge, SETS), 'sets', edge.id, declaredOutput, issues);
+    const to = enteredIn(target);
+    if (to === undefined) continue;
+    for (const from of leavesIn(source)) {
+      transitions.push({
+        id: edge.id,
+        from,
+        to,
+        declaredFrom: from === source ? undefined : source,
+        declaredTo: to === target ? undefined : target,
+        trigger: textOf(edge, TRIGGER) ?? edge.label,
+        guard: textOf(edge, GUARD),
+        sets,
+        retargeted: source !== edge.source || target !== edge.target,
+      });
+    }
   }
 
   // A trigger names an event, and a machine is in one state at a time: two
@@ -390,7 +560,9 @@ export function expandMachine(graph: Graph, machine: Id): MachineView {
   } else {
     const at = resolve(declaredStart);
     if (inForce.has(at)) {
-      initial = at;
+      // The machine starts in a state, and a container is a level rather than a
+      // state: the machine starts in what the container says it starts in.
+      initial = enteredIn(at);
     } else {
       issues.push({
         severity: 'error',

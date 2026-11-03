@@ -27,6 +27,17 @@ export type { Constant } from './expand';
  * picking is what the model has to do, either by writing the output somewhere on
  * every path or by asserting it with `sets`.
  *
+ * A state may sit inside another one (see expand.ts). The machine is then only ever
+ * in a state at the bottom of the tree, so only those states get a row here: a
+ * container is a level of the statechart, not a configuration. A crossing leaves and
+ * enters a chain of states rather than one, and the three rules above still apply,
+ * read along that chain -- the `exit` pieces run from the state left outwards, the
+ * `entry` pieces run from the outermost container inwards, and the two chains meet
+ * at the innermost state both ends are inside. Crossing between two states of the
+ * same container therefore writes nothing but their own pieces, while crossing out
+ * of a container writes its `exit`, which is how an output can be guaranteed `0` by
+ * leaving a whole mode rather than by repeating the assignment in every state.
+ *
  * `sets` never writes. It is an assertion by the model about its own behaviour, and
  * the only thing this module does with it is check it: agrees, undecided, or
  * contradicted.
@@ -61,11 +72,22 @@ export interface HoldsView {
   reachable: boolean;
 }
 
+/** What one crossing writes on the way out and on the way in, each merged last-wins. */
+interface Crossing {
+  /** Outputs written by the states left, innermost first. */
+  leaving: Map<string, Constant>;
+  /** Outputs written by the states entered, outermost first. */
+  entering: Map<string, Constant>;
+}
+
 /** The outputs of one machine, read along every path through it. */
 export interface PathsView {
   /** Id of the machine the paths were read for. */
   machine: Id;
-  /** One entry per state and output, in state order then output order. */
+  /**
+   * One entry per state the machine can be in and output, in state order then output
+   * order. A container has no row: only the states at the bottom hold anything.
+   */
   holds: readonly HoldsView[];
   /** Assertions that do not hold, and outputs no state writes. Never thrown. */
   issues: Issue[];
@@ -91,6 +113,57 @@ export function readPaths(view: MachineView): PathsView {
     entry.set(state.id, writesOf(state.entry));
     exit.set(state.id, writesOf(state.exit));
   }
+
+  // Which states sit inside which, outermost first, so a crossing can name what it
+  // leaves and what it enters without walking the graph again.
+  const ancestorsOf = new Map<Id, readonly Id[]>();
+  for (const state of view.states) ancestorsOf.set(state.id, state.ancestors);
+
+  /** One state with everything around it, outermost first, the state itself last. */
+  const pathOf = (id: Id): Id[] => [...(ancestorsOf.get(id) ?? []), id];
+
+  /**
+   * The states one crossing leaves and the states it enters. Both are given the way
+   * the pieces would run, so merging them last-wins is the order a statechart runs.
+   *
+   * A machine is never in a container, so a crossing only has to leave the states
+   * around the state it was in and enter the states around the state it arrives at.
+   * The two chains meet at the innermost state both ends are inside: nothing above
+   * that point is left or entered, which is why a crossing between siblings is the
+   * flat case this module had before states could hold states, and why `from === to`
+   * leaves and enters exactly one state.
+   */
+  const crossingOf = (from: Id, to: Id): { leaving: Id[]; entering: Id[] } => {
+    const shared = sharedPrefix(ancestorsOf.get(from) ?? [], ancestorsOf.get(to) ?? []);
+    return { leaving: pathOf(from).slice(shared).reverse(), entering: pathOf(to).slice(shared) };
+  };
+
+  /** The pieces the given states write, merged with the last one winning. */
+  const writesAlong = (ids: readonly Id[], table: Map<Id, Map<string, Constant>>): Map<string, Constant> => {
+    const writes = new Map<string, Constant>();
+    for (const id of ids) {
+      const written = table.get(id);
+      if (!written) continue;
+      for (const [output, value] of written) writes.set(output, value);
+    }
+    return writes;
+  };
+
+  // What each crossing writes, computed once per transition object. Keyed by the
+  // object and never by the id: a transition written on a container becomes one
+  // crossing from each state at the bottom of it, and those crossings leave
+  // different states. The id belongs to the edge, the crossing does not.
+  const crossings = new Map<TransitionView, Crossing>();
+  for (const transition of view.transitions) {
+    const { leaving, entering } = crossingOf(transition.from, transition.to);
+    crossings.set(transition, {
+      leaving: writesAlong(leaving, exit),
+      entering: writesAlong(entering, entry),
+    });
+  }
+  const noWrites: Crossing = { leaving: new Map(), entering: new Map() };
+  /** What one transition writes. Every transition was crossed above. */
+  const crossing = (transition: TransitionView): Crossing => crossings.get(transition) ?? noWrites;
 
   // Which states a path can arrive at at all. Kept apart from the values, because a
   // machine with no declared outputs still has reachable states.
@@ -119,13 +192,14 @@ export function readPaths(view: MachineView): PathsView {
     holds.set(state.id, perOutput);
   }
 
-  // The initial state holds what it writes on entry and nothing else; these values
-  // are not delivered by a transition, so they carry no witness.
+  // The initial state holds what it writes on the way in and nothing else: whatever
+  // the states around it write, then its own `entry`. Nothing crossed into it, so
+  // these values carry no witness.
   const initial = view.initial;
   if (initial !== undefined) {
     const seed = holds.get(initial);
-    const written = entry.get(initial);
-    if (seed && written) {
+    const written = writesAlong(pathOf(initial), entry);
+    if (seed) {
       for (const output of outputs) {
         const values = seed.get(output);
         if (values) values.set(written.get(output), undefined);
@@ -144,9 +218,8 @@ export function readPaths(view: MachineView): PathsView {
       if (transition.from !== from) continue;
       const source = holds.get(from);
       const target = holds.get(transition.to);
-      const written = entry.get(transition.to);
-      const leaving = exit.get(from);
-      if (!source || !target || !written || !leaving) continue;
+      if (!source || !target) continue;
+      const { leaving, entering } = crossing(transition);
       let changed = false;
       for (const output of outputs) {
         const inValues = source.get(output);
@@ -156,14 +229,13 @@ export function readPaths(view: MachineView): PathsView {
           outValues = new Map();
           target.set(output, outValues);
         }
-        // The successor's entry wins, then what the predecessor's exit wrote, then
-        // whatever the path carried in. Whichever it is, the value arrived here by
-        // this transition, which is what a witness names.
-        const entering = written.get(output);
-        const leavingWith = leaving.get(output);
+        // What the crossing writes on the way in wins, then what it wrote on the way
+        // out, then whatever the path carried in. Whichever it is, the value arrived
+        // here by this transition, which is what a witness names.
+        const onEntry = entering.get(output);
+        const onExit = leaving.get(output);
         for (const [value] of inValues) {
-          const next =
-            entering !== undefined ? entering : leavingWith !== undefined ? leavingWith : value;
+          const next = onEntry !== undefined ? onEntry : onExit !== undefined ? onExit : value;
           if (outValues.has(next)) continue;
           outValues.set(next, next === undefined ? undefined : transition.id);
           changed = true;
@@ -186,6 +258,16 @@ export function readPaths(view: MachineView): PathsView {
   };
 
   /**
+   * How a message names one crossing. A transition written on a container stands
+   * for several crossings, so the message has to say which one it means, or a reader
+   * would look for an edge leaving a state that has no transition of its own.
+   */
+  const nameOf = (transition: TransitionView): string =>
+    transition.declaredFrom === undefined
+      ? `"${transition.id}"`
+      : `"${transition.id}" from "${transition.from}"`;
+
+  /**
    * The set of values one crossing delivers to one output, each with the transition it
    * came from.
    *
@@ -202,11 +284,12 @@ export function readPaths(view: MachineView): PathsView {
     if (!source || !reachable.has(transition.from)) return result;
     const inValues = source.get(output);
     if (!inValues) return result;
-    const written = entry.get(transition.to)?.get(output);
-    const left = exit.get(transition.from)?.get(output);
-    const decided = written !== undefined || left !== undefined;
+    const { leaving, entering } = crossing(transition);
+    const onEntry = entering.get(output);
+    const onExit = leaving.get(output);
+    const decided = onEntry !== undefined || onExit !== undefined;
     for (const [value, via] of inValues) {
-      const next = written !== undefined ? written : left !== undefined ? left : value;
+      const next = onEntry !== undefined ? onEntry : onExit !== undefined ? onExit : value;
       if (!result.has(next)) result.set(next, decided ? undefined : via);
     }
     return result;
@@ -224,7 +307,7 @@ export function readPaths(view: MachineView): PathsView {
           severity: 'warning',
           code: 'sets-undecided',
           subject: transition.id,
-          message: `"${transition.id}" says it sets "${assertion.output}" to ${show(assertion.value)}, but the machine cannot reach "${transition.from}", so the assertion is unchecked.`,
+          message: `${nameOf(transition)} says it sets "${assertion.output}" to ${show(assertion.value)}, but the machine cannot reach "${transition.from}", so the assertion is unchecked.`,
         });
         continue;
       }
@@ -240,7 +323,7 @@ export function readPaths(view: MachineView): PathsView {
           severity: 'warning',
           code: 'sets-undecided',
           subject: transition.id,
-          message: `"${transition.id}" says it sets "${assertion.output}" to ${show(assertion.value)}, but crossing it can also leave ${others}, so the assertion holds on some paths only.`,
+          message: `${nameOf(transition)} says it sets "${assertion.output}" to ${show(assertion.value)}, but crossing it can also leave ${others}, so the assertion holds on some paths only.`,
         });
         continue;
       }
@@ -249,7 +332,7 @@ export function readPaths(view: MachineView): PathsView {
           severity: 'warning',
           code: 'sets-undecided',
           subject: transition.id,
-          message: `"${transition.id}" says it sets "${assertion.output}" to ${show(assertion.value)}, but nothing writes "${assertion.output}" before this transition, so it may hold nothing at all.`,
+          message: `${nameOf(transition)} says it sets "${assertion.output}" to ${show(assertion.value)}, but nothing writes "${assertion.output}" before this transition, so it may hold nothing at all.`,
         });
         continue;
       }
@@ -257,7 +340,7 @@ export function readPaths(view: MachineView): PathsView {
         severity: 'error',
         code: 'sets-contradicted',
         subject: transition.id,
-        message: `"${transition.id}" says it sets "${assertion.output}" to ${show(assertion.value)}, but crossing it leaves ${others}.`,
+        message: `${nameOf(transition)} says it sets "${assertion.output}" to ${show(assertion.value)}, but crossing it leaves ${others}.`,
       });
     }
   }
@@ -282,6 +365,9 @@ export function readPaths(view: MachineView): PathsView {
 
   const result: HoldsView[] = [];
   for (const state of view.states) {
+    // A container is a level of the statechart, not a state the machine is in, so
+    // it has no row of its own: what it writes is read at the crossings in and out.
+    if (state.children.length > 0) continue;
     const perOutput = holds.get(state.id);
     for (const output of outputs) {
       const values = perOutput?.get(output);
@@ -299,6 +385,14 @@ export function readPaths(view: MachineView): PathsView {
   }
 
   return { machine: view.machine, holds: result, issues };
+}
+
+/** How many leading ids two chains share, which is the innermost state they have in common. */
+function sharedPrefix(a: readonly Id[], b: readonly Id[]): number {
+  const end = Math.min(a.length, b.length);
+  let at = 0;
+  while (at < end && a[at] === b[at]) at += 1;
+  return at;
 }
 
 /** What a state writes, as a map from output to constant; the last piece wins. */
