@@ -40,6 +40,7 @@ export function buildOntology(spec: OntologySpec): { ontology: Ontology; issues:
       continue;
     }
     declared.set(type.name, type);
+    checkAttributeSpecs(type.attributes, type.name, issues);
   }
 
   // The chain of ancestors of a type, ending with the type itself. A parent chain
@@ -161,6 +162,7 @@ export function buildOntology(spec: OntologySpec): { ontology: Ontology; issues:
         message: `Relation "${relation.name}" has ${limit} ${value}; a limit is a whole number of one or more.`,
       });
     }
+    checkAttributeSpecs(relation.attributes, relation.name, issues);
     relations[relation.name] = {
       name: relation.name,
       source: relation.source,
@@ -169,6 +171,7 @@ export function buildOntology(spec: OntologySpec): { ontology: Ontology; issues:
       maxIn: relation.maxIn,
       acyclic: relation.acyclic ?? false,
       allowSelfLoops: relation.allowSelfLoops ?? true,
+      attributes: relation.attributes ?? {},
       doc: relation.doc,
     };
   }
@@ -238,6 +241,40 @@ function overrideProblem(
 /** `"a", "b"` */
 function describeValues(values: readonly unknown[]): string {
   return values.map((value) => JSON.stringify(value)).join(', ');
+}
+
+const KINDS = ['string', 'number', 'boolean'] as const;
+
+/**
+ * Checks the shape of attribute declarations themselves: a kind that exists, and
+ * allowed values that are of that kind. Reported once here, at the declaration,
+ * instead of as the same failure on every instance that follows it.
+ */
+function checkAttributeSpecs(
+  specs: Readonly<Record<string, AttributeSpec>> | undefined,
+  owner: string,
+  issues: Issue[],
+): void {
+  for (const [key, spec] of Object.entries(specs ?? {})) {
+    const subject = `${owner}.${key}`;
+    if (!KINDS.includes(spec.kind)) {
+      issues.push({
+        severity: 'error',
+        code: 'bad-attribute-kind',
+        subject,
+        message: `"${subject}" is declared as a ${JSON.stringify(spec.kind)}, and an attribute is a string, a number or a boolean.`,
+      });
+      continue;
+    }
+    const wrong = (spec.values ?? []).filter((value) => typeof value !== spec.kind);
+    if (wrong.length === 0) continue;
+    issues.push({
+      severity: 'error',
+      code: 'bad-attribute-value',
+      subject,
+      message: `"${subject}" allows ${describeValues(wrong)}, which ${wrong.length === 1 ? 'is not a' : 'are not'} ${spec.kind}.`,
+    });
+  }
 }
 
 /** The ancestors of a type, from the root of the chain down to the type itself; empty when undeclared. */

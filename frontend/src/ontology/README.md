@@ -53,23 +53,30 @@ Two consequences worth keeping:
 - If the replaced state is not in force at that point in the chain the override
   is unknown (`unknown-override`). It is reported, not silently dropped.
 
-## The trigger is the edge label
+## The trigger is an attribute
 
-A transition needs a trigger, and `RelationSpec` cannot declare edge attributes
-yet (see below), so `moves-to` edges carry theirs in `Edge.label`:
+`RelationSpec` declares what an edge carries, and `validateGraph` checks an edge
+against that declaration exactly as it checks a node against its type. `moves-to`
+declares two string attributes — both **names**, never expressions, because nothing
+evaluates them:
 
 ```ts
-{ id: 't1', relation: MOVES_TO, source: 'idle', target: 'parsing', label: 'input' }
+{
+  id: 't1',
+  relation: MOVES_TO,
+  source: 'idle',
+  target: 'parsing',
+  attributes: { [TRIGGER]: 'input', [GUARD]: 'ready' },
+}
 ```
 
-`expandMachine` copies it to `TransitionView.trigger`. When `RelationSpec` grows
-an `attributes` field this should become a declared attribute like any other, and
-`label` should go back to being a caption.
+`expandMachine` reads them into `TransitionView.trigger` and `.guard`. `label` is
+back to being a caption. A model written before relations could declare
+attributes still reads its trigger from the label; that fallback is one expression
+in `expand.ts`, so it goes in a single commit once those models are migrated.
 
 ## Known gaps
 
-- **No edge attributes in the metamodel.** `RelationSpec` has no `attributes`, so
-  nothing checks what an edge carries. Hence the label convention above.
 - **No composite states.** A machine is flat. Nesting means an `owns` edge from
   state to state, plus a rule that the child machine's `starts-at` is entered on
   entry — neither is declared.

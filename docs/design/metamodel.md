@@ -82,7 +82,7 @@ indistinguishable from a coincidence.
 | `realizes` | module → interface | a module fulfils a contract |
 | `owns` | machine → state | `maxIn: 1` — one owner per state |
 | `starts-at` | machine → state | `maxOut: 1` — one entry state |
-| `moves-to` | state → state | self-loops allowed; the edge **label** is the trigger |
+| `moves-to` | state → state | self-loops allowed; declares `trigger` and `guard` as **edge attributes** — each one a name, never an expression |
 | `inherits` | machine → machine | `maxOut: 1`, `acyclic` — one parent, so what is inherited is never in doubt |
 
 Choosing between `uses` and `depends-on` is the whole product: a compile-time need
@@ -126,9 +126,22 @@ is why the three can share one graph and one set of checks.
 
 | Gap | Why it is not closed yet |
 | --- | --- |
-| **Edge attributes** | `RelationSpec` has no `attributes`, so nothing can check what an edge carries. The transition trigger therefore lives in `Edge.label`; when the field exists it becomes a declared attribute and the label goes back to being a caption. |
 | **Composite / orthogonal states** | Needs `owns` between states plus an entry rule. The metamodel can already express the edges; the reading in `expandMachine` does not walk them. |
 | **Unreachable states** | `expandMachine` reports a missing entry state but not a state no transition reaches. `reachableFrom` already exists. |
 | **Layer order** | `layer` is a closed list of words; it does not say that `presentation` may only depend on `application`. That is an order between types, which the metamodel cannot express. |
 | **Dead-dependency detector** | The draft's "declared `depends-on` but never `uses` — is it really a dependency?" is a cross-relation query nobody has written. |
 | **The existing cloud vocabulary** | `frontend/src/dsl/kinds.ts` (17 kinds: database, pipeline, instance, …) still stands beside this ontology. It is to become one more `OntologySpec` — the lower layer — with the file untouched until the views can read either. |
+
+**Edge attributes are no longer on this list.** `RelationSpec` and `ResolvedRelation`
+now carry `attributes`, so an edge is checked against its relation exactly as a node
+is checked against its type — same function, same codes (`unknown-attribute`,
+`missing-attribute`, `attribute-kind`, `attribute-value`) — and `buildOntology`
+rejects a relation that declares a kind or an allowed value the engine cannot take
+(`bad-attribute-kind`, `bad-attribute-value`). The transition trigger is therefore
+data: `moves-to` declares `trigger` and `guard` as `string`, and `Edge.label` is a
+caption again. `expandMachine` still falls back to the label, so a graph written
+before the change keeps its behaviour; the fallback is one expression in one place.
+What this unlocks is the interesting part: with a trigger named in the model, "a
+transition with no trigger is the default", "two defaults leave one state" and "the
+same trigger twice is a nondeterminism" become checkable questions rather than
+drawing conventions.

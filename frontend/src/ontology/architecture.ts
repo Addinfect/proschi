@@ -54,8 +54,14 @@ export const OWNS = 'owns';
 /** The state the machine is in before anything happens. */
 export const STARTS_AT = 'starts-at';
 
-/** A transition from one state to another; the edge's label is the trigger. */
+/** A transition from one state to another. */
 export const MOVES_TO = 'moves-to';
+
+/** A `moves-to` edge's trigger: the event that makes the machine take it. */
+export const TRIGGER = 'trigger';
+
+/** A `moves-to` edge's guard: why this transition, when several leave the same state. */
+export const GUARD = 'guard';
 
 /** The machine takes over the behaviour of another one. */
 export const INHERITS = 'inherits';
@@ -155,7 +161,17 @@ export const ARCHITECTURE: OntologySpec = {
       source: [STATE],
       target: [STATE],
       allowSelfLoops: true,
-      doc: "A transition. The edge's label holds the trigger, which is all a statechart needs to draw; a state may move to itself.",
+      attributes: {
+        [TRIGGER]: {
+          kind: 'string',
+          doc: 'The event that makes the machine take this transition. A name, never an expression: nothing evaluates it.',
+        },
+        [GUARD]: {
+          kind: 'string',
+          doc: 'The condition under which the event takes this transition rather than another one leaving the same state. A name, never an expression.',
+        },
+      },
+      doc: 'A transition. A state may move to itself, which is how a machine repeats an action without leaving.',
     },
     {
       name: INHERITS,

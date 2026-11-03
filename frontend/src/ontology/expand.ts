@@ -1,5 +1,23 @@
-import { indexGraph, successors, type Graph, type Id, type Issue, type Node } from '../engine';
-import { INHERITS, MACHINE, MOVES_TO, OWNS, OVERRIDES, STARTS_AT, STATE } from './architecture';
+import {
+  indexGraph,
+  successors,
+  type Edge,
+  type Graph,
+  type Id,
+  type Issue,
+  type Node,
+} from '../engine';
+import {
+  GUARD,
+  INHERITS,
+  MACHINE,
+  MOVES_TO,
+  OWNS,
+  OVERRIDES,
+  STARTS_AT,
+  STATE,
+  TRIGGER,
+} from './architecture';
 
 /**
  * Reads a machine through its chain of inheritance.
@@ -43,8 +61,10 @@ export interface TransitionView {
   from: Id;
   /** State the machine enters, after overrides. */
   to: Id;
-  /** Trigger the author wrote on the edge label. */
+  /** The event the transition waits for; absent on a transition that fires by itself. */
   trigger?: string;
+  /** The condition that picks this transition among the ones leaving the same state. */
+  guard?: string;
   /** True when an override moved one end of the transition onto a replacing state. */
   retargeted: boolean;
 }
@@ -232,7 +252,8 @@ export function expandMachine(graph: Graph, machine: Id): MachineView {
       id: edge.id,
       from,
       to,
-      trigger: edge.label,
+      trigger: textOf(edge, TRIGGER) ?? edge.label,
+      guard: textOf(edge, GUARD),
       retargeted: from !== edge.source || to !== edge.target,
     });
   }
@@ -270,3 +291,14 @@ export function expandMachine(graph: Graph, machine: Id): MachineView {
 
   return { machine, states, transitions, initial, issues };
 }
+
+/**
+ * A text attribute of an edge, when it is set. Attributes are scalars, so this also
+ * refuses the case where an author wrote a number where a name belongs; the check
+ * for that is the engine's `attribute-kind`, and this only declines to read it.
+ */
+function textOf(edge: Edge, key: string): string | undefined {
+  const value = edge.attributes?.[key];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+

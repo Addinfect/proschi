@@ -124,6 +124,12 @@ export interface RelationSpec {
   acyclic?: boolean;
   /** True when an edge may start and end on the same node; default true. */
   allowSelfLoops?: boolean;
+  /**
+   * What an edge of this relation may carry, checked against the edge exactly as a
+   * node's attributes are checked against its type. A relation declares these
+   * itself: relations do not extend one another, so there is nothing to inherit.
+   */
+  attributes?: Readonly<Record<string, AttributeSpec>>;
   doc?: string;
 }
 
@@ -156,6 +162,8 @@ export interface ResolvedRelation {
   acyclic: boolean;
   /** True when an edge may start and end on the same node. */
   allowSelfLoops: boolean;
+  /** What an edge of this relation may carry; empty when it declares nothing. */
+  attributes: Readonly<Record<string, AttributeSpec>>;
   doc?: string;
 }
 

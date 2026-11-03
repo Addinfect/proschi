@@ -290,3 +290,81 @@ describe('validateGraph', () => {
     expect(codes).toEqual(['missing-attribute', 'attribute-kind', 'unknown-attribute']);
   });
 });
+
+describe('edge attributes', () => {
+  /** A relation that declares what its edges carry; nothing to inherit, so declared once. */
+  const spec: OntologySpec = {
+    types: [{ name: 'unit' }],
+    relations: [
+      {
+        name: 'links',
+        attributes: {
+          note: { kind: 'string' },
+          weight: { kind: 'number' },
+          bond: { kind: 'string', values: ['hard', 'soft'] },
+          must: { kind: 'boolean', required: true },
+        },
+      },
+    ],
+  };
+
+  const { ontology: onEdges } = buildOntology(spec);
+
+  /** One edge that carries `attributes`, between two units. */
+  const edge = (attributes: Record<string, string | number | boolean>): Graph => ({
+    nodes: [
+      { id: 'a', type: 'unit' },
+      { id: 'b', type: 'unit' },
+    ],
+    edges: [{ id: 'a-links-b', relation: 'links', source: 'a', target: 'b', attributes }],
+  });
+
+  const codes = (attributes: Record<string, string | number | boolean>): string[] =>
+    validateGraph(onEdges, edge(attributes)).map((issue) => issue.code);
+
+  it('resolves the attributes a relation declares', () => {
+    expect(Object.keys(onEdges.relations.links.attributes).sort()).toEqual([
+      'bond',
+      'must',
+      'note',
+      'weight',
+    ]);
+  });
+
+  it('accepts an edge that carries what the relation declares', () => {
+    expect(codes({ note: 'why', weight: 2, bond: 'hard', must: true })).toEqual([]);
+  });
+
+  it('reports an attribute the relation does not declare', () => {
+    expect(codes({ must: true, colour: 'red' })).toEqual(['unknown-attribute']);
+  });
+
+  it('reports the wrong kind and a value outside the allowed set', () => {
+    expect(codes({ must: true, weight: 'heavy' })).toEqual(['attribute-kind']);
+    expect(codes({ must: true, bond: 'medium' })).toEqual(['attribute-value']);
+  });
+
+  it('reports an attribute the relation requires and the edge omits', () => {
+    expect(codes({ note: 'why' })).toEqual(['missing-attribute']);
+  });
+
+  it('reports a declaration whose kind does not exist', () => {
+    const declared = buildOntology({
+      types: [],
+      relations: [
+        {
+          name: 'links',
+          attributes: {
+            note: { kind: 'text' as 'string' },
+            weight: { kind: 'number', values: [1, 'two'] },
+          },
+        },
+      ],
+    });
+    expect(declared.issues.map((issue) => issue.code)).toEqual([
+      'bad-attribute-kind',
+      'bad-attribute-value',
+    ]);
+  });
+});
+

@@ -145,6 +145,9 @@ export function validateGraph(
         loc: edge.loc,
       });
     }
+    issues.push(
+      ...checkAttributes(relation.attributes, edge.attributes, edge.id, edge.loc, options),
+    );
   }
 
   const index = indexGraph(graph);

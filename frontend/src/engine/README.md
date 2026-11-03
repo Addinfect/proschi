@@ -38,12 +38,21 @@ that reason.
   are inherited and cannot be dropped.
 - **Relations** (`RelationSpec`): a name, the types allowed at `source` and
   `target` (a subtype is accepted wherever a parent type is named), `maxOut` and
-  `maxIn` counts, `acyclic`, and `allowSelfLoops`.
+  `maxIn` counts, `acyclic`, `allowSelfLoops`, and — like a type — `attributes`:
+  the scalars an edge of this relation may carry.
 
 `acyclic: true` is what makes a relation an order (dependencies, containment);
 leaving it off allows a cycle (usage, calls, transitions). `maxIn: 1` is what
 makes a relation a tree (composition, inheritance of a single parent). One graph
 therefore reads as several structures at once, chosen by `WalkOptions.relations`.
+
+Attributes are checked in both places they can be written. `validateGraph` holds
+every node against its type and every edge against its relation, with the same
+function and the same issue codes; `buildOntology` reports a declaration whose
+`kind` does not exist (`bad-attribute-kind`) or whose allowed `values` are of
+another kind (`bad-attribute-value`), so a typo in an ontology is not repeated as
+a failure on every instance. Relations do not extend one another, so their
+attributes are declared, never inherited — no `override` machinery applies.
 
 ## Attribute kinds are `typeof` tags
 

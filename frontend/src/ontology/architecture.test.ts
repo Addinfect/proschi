@@ -10,7 +10,9 @@ import {
   OWNS,
   REALIZES,
   STARTS_AT,
+  GUARD,
   STATE,
+  TRIGGER,
   USES,
 } from './architecture';
 import { expandMachine, machinesIn } from './expand';
@@ -73,7 +75,13 @@ const machines: Graph = {
     { id: 'editor-owns-rendering', relation: OWNS, source: 'editor', target: 'rendering' },
     { id: 'editor-owns-failing', relation: OWNS, source: 'editor', target: 'failing' },
     { id: 'editor-starts', relation: STARTS_AT, source: 'editor', target: 'idle' },
-    { id: 'idle-to-parsing', relation: MOVES_TO, source: 'idle', target: 'parsing', label: 'input' },
+    {
+      id: 'idle-to-parsing',
+      relation: MOVES_TO,
+      source: 'idle',
+      target: 'parsing',
+      attributes: { [TRIGGER]: 'input' },
+    },
     { id: 'parsing-to-rendering', relation: MOVES_TO, source: 'parsing', target: 'rendering' },
     { id: 'rendering-to-idle', relation: MOVES_TO, source: 'rendering', target: 'idle' },
     { id: 'parsing-to-failing', relation: MOVES_TO, source: 'parsing', target: 'failing', label: 'error' },
@@ -263,3 +271,47 @@ describe('expanding a machine', () => {
     ]);
   });
 });
+
+describe('transition triggers', () => {
+  /** Two transitions leaving one state: one named by attribute, one by a label only. */
+  const triggered: Graph = {
+    nodes: [
+      { id: 'machine', type: MACHINE, attributes: { layer: 'presentation' } },
+      { id: 'a', type: STATE },
+      { id: 'b', type: STATE },
+      { id: 'c', type: STATE },
+    ],
+    edges: [
+      { id: 'machine-owns-a', relation: OWNS, source: 'machine', target: 'a' },
+      { id: 'machine-owns-b', relation: OWNS, source: 'machine', target: 'b' },
+      { id: 'machine-owns-c', relation: OWNS, source: 'machine', target: 'c' },
+      { id: 'machine-starts', relation: STARTS_AT, source: 'machine', target: 'a' },
+      {
+        id: 'a-to-b',
+        relation: MOVES_TO,
+        source: 'a',
+        target: 'b',
+        attributes: { [TRIGGER]: 'go', [GUARD]: 'ready' },
+      },
+      { id: 'a-to-c', relation: MOVES_TO, source: 'a', target: 'c', label: 'stop' },
+    ],
+  };
+
+  it('reads a trigger and a guard from the edge attributes', () => {
+    const view = expandMachine(triggered, 'machine');
+    expect(view.issues).toEqual([]);
+    const named = view.transitions.find((transition) => transition.id === 'a-to-b');
+    expect(named?.trigger).toBe('go');
+    expect(named?.guard).toBe('ready');
+  });
+
+  it('still reads a label where no trigger attribute is set', () => {
+    const view = expandMachine(triggered, 'machine');
+    expect(view.transitions.find((transition) => transition.id === 'a-to-c')?.trigger).toBe('stop');
+  });
+
+  it('accepts both attributes under the ontology', () => {
+    expect(validateGraph(ontology, triggered)).toEqual([]);
+  });
+});
+
