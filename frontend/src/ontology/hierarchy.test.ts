@@ -257,7 +257,13 @@ describe('reading a path through states inside states', () => {
     // `armed` was written by the container on the way in and is neither rewritten nor
     // reset by a crossing inside it, so it travels along.
     expect(witnessed(view, 'braking', 'armed')).toEqual(['true via slow']);
-    expect(witnessed(view, 'braking', 'drive')).toEqual(['nothing via slow']);
+    // Two paths arrive, so `drive` has two possible values: nothing wrote it on the way in
+    // from the machine, and `stopped` wrote 0 on the way in from the road. Nothing between
+    // the machine and `braking` overwrites or clears it, so the value travels through the
+    // container untouched -- a crossing inside a container changes the state, not the
+    // outputs. The value no write carries is named after the start, because there is no
+    // crossing to point at.
+    expect(witnessed(view, 'braking', 'drive')).toEqual(['0 via slow', 'nothing via start']);
   });
 
   it('holds an assertion the crossing decides, on every crossing the edge stands for', () => {

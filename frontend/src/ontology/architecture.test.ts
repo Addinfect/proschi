@@ -308,12 +308,14 @@ describe('a state inside a state', () => {
 
   it('still makes a contained state belong to the machine', () => {
     // Ownership and containment are different questions: the machine owns the state,
-    // `contains` only says where inside the machine it sits.
+    // `contains` only says where inside the machine it sits. So a state that already
+    // has its owner must not be used here -- it would report a second owner as well and
+    // hide the one thing being asked: who may write `owns` at all.
     const graphed: Graph = {
-      nodes: nested.nodes,
+      nodes: [...nested.nodes, { id: 'idle', type: STATE }],
       edges: [
         ...nested.edges,
-        { id: 'running-owns-braking', relation: OWNS, source: 'running', target: 'braking' },
+        { id: 'running-owns-idle', relation: OWNS, source: 'running', target: 'idle' },
       ],
     };
     expect(codesOf(graphed)).toEqual(['relation-source']);
@@ -365,7 +367,11 @@ describe('a state inside a state', () => {
           target: 'running',
         }),
       ),
-    ).toEqual(['self-loop']);
+      // Two codes for one edge: `self-loop` says an edge that leaves and enters the same
+      // node may not be a `contains` at all, `cycle` says the relation must stay acyclic.
+      // The engine reports every acyclic relation that way -- `depends-on`, `composes`
+      // and `inherits` too -- so this is the engine as it is, not a rule of this ontology.
+    ).toEqual(['self-loop', 'cycle']);
   });
 
   it('refuses a tree of states that closes on itself', () => {
