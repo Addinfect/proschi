@@ -103,9 +103,43 @@ box is shortened with an ellipsis, because a box that grows with its label would
 undo the ranks. Colour, dash and weight are the stylesheet's business: `kind` is
 handed out by the layout and styled by CSS.
 
+## `ScopeCanvas.tsx`
+
+The `<svg>`, and nothing else: one loop over a layout.
+
+```tsx
+<ScopeCanvas
+  layout={layoutScope(readScope(graph, spec), { labelOf })}
+  onOpen={(id) => setRoot(id)}   // a box that has something inside
+  onSelect={setSelected}         // a box that does not
+  selected={selected}
+/>
+```
+
+It is deliberately a plain `<svg>` and not a diagram library. Positions are already
+computed — there is no dragging to do, and dragging a box whose place came from a
+rank would be a lie about the model — so what a library would add is hit testing,
+which a `<rect>` does by itself. A box is a `<g role="button" tabIndex={0}>` with
+an `aria-label`, so click, hover, focus, Enter and Space come from the platform.
+
+Three decisions worth naming:
+
+- **One target, one action.** A box that opens, opens; a box that closes, is marked.
+  Both come from the host as callbacks — the canvas knows nothing about routes or
+  stores, so where the picture lives is decided at the call site.
+- **No callback, no button.** Without `onOpen`/`onSelect` a box is a rectangle and
+  not a tab stop, because a control that does nothing is worse than a drawing.
+- **The ink is `ink.ts`'s.** The test compares the `d` it writes with `drawnPath`,
+  so the two cannot drift apart.
+
+Not here yet: zoom and pan. They belong on the `viewBox` — one state, wheel and
+drag, then `getScreenCTM().inverse()` for a click on empty space — and they change
+nothing above this line.
+
 ## Not written yet
 
-The component that loops over a layout and returns a `<svg>`, and the two readings
+The two readings
 that are not a level of a tree (§6 of `docs/design/metamodel.md`): the Harel-style
 statechart and the control-flow reading of `step` nodes. Both are drawn from
-`expandMachine`/`readPaths` in `src/ontology/`, and are not scope questions — a statechart is not drawn one level at a time.
+`expandMachine`/`readPaths` in `src/ontology/`, and are not scope
+questions — a statechart is not drawn one level at a time.
