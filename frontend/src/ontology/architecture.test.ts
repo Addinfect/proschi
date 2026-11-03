@@ -13,6 +13,7 @@ import {
   MOVES_TO,
   OWNS,
   REALIZES,
+  SETS,
   STARTS_AT,
   GUARD,
   STATE,
@@ -530,6 +531,45 @@ describe('what a state writes', () => {
       { output: 'armed', value: 1 },
       { output: 'tripped', value: false },
     ]);
+  });
+
+  it('reports a name written twice in one piece list, and keeps the last', () => {
+    const graphed = withStates([
+      { id: 'idle', type: STATE, attributes: { [ENTRY]: 'armed = 1; armed = 0' } },
+    ]);
+    expect(issuesOf(graphed)).toEqual(['duplicate-effect@idle']);
+    // The list is kept as written, and the analysis in paths.ts takes the last one.
+    expect(expandMachine(graphed, 'machine').states[0]?.entry).toEqual([
+      { output: 'armed', value: 1 },
+      { output: 'armed', value: 0 },
+    ]);
+  });
+
+  it('reads what a transition asserts into the transition, not into a state', () => {
+    const graphed = withStates(
+      [
+        { id: 'idle', type: STATE },
+        { id: 'busy', type: STATE },
+      ],
+      [
+        { id: 'machine-owns-busy', relation: OWNS, source: 'machine', target: 'busy' },
+        {
+          id: 'idle-busy',
+          relation: MOVES_TO,
+          source: 'idle',
+          target: 'busy',
+          attributes: { [SETS]: 'armed = 1; mode = "auto"' },
+        },
+      ],
+    );
+    const view = expandMachine(graphed, 'machine');
+    expect(view.issues).toEqual([]);
+    expect(view.transitions[0]?.sets).toEqual([
+      { output: 'armed', value: 1 },
+      { output: 'mode', value: 'auto' },
+    ]);
+    // Nothing is written by asserting it: both states still write nothing.
+    expect(view.states.map((state) => state.entry)).toEqual([[], []]);
   });
 });
 

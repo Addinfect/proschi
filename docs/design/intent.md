@@ -180,10 +180,20 @@ which is cheaper than a human writing predicates.
    `many-defaults` (two transitions without a trigger under different guards).
    Both are machine semantics, so they stay out of `src/engine/`. What is left of
    this step is guard *overlap*, which needs predicates and is parked with them (§9).
-2. **`entry` / `do` / `exit` lowered onto state attributes** (§4) — read and
-   checked: the pieces are parsed, the names are declared, and `bad-effect`,
-   `unknown-output` and `duplicate-output` are reported. Still open from this step:
-   the path-dependent analysis and the three-outcome check.
+2. ~~**`entry` / `do` / `exit` lowered onto state attributes**~~ (§4) — done, in
+   three parts. Read and checked: the pieces are parsed, the names are declared, and
+   `bad-effect`, `unknown-output`, `duplicate-output` and `duplicate-effect` are
+   reported. Then the path analysis, in `paths.ts`: crossing a transition, the
+   successor's `entry` wins, then the predecessor's `exit`, then what the path
+   carried, so a state that writes nothing keeps everything and the initial state
+   holds nothing until something writes it. Then the three outcomes, written as
+   `sets` on an edge: agreed, `sets-undecided` (the asserted value is reachable but
+   so is another one), `sets-contradicted` (no path delivers it). `sets` is an
+   assertion only — it writes nothing, and the analysis says so in one place.
+   `output-never-set` covers the output nobody drives at all. What is *not* checked
+   from §4: arithmetic, timing, and a value that only holds while a transition
+   crosses — the vocabulary has none of those, and guessing at them would be worse
+   than the silence.
 3. **Composite and orthogonal states** (§5), emergency stop as the test case.
 4. **`src/views/` with a scope** (§3) — structure, behaviour, control flow.
 5. **Control flow** as a reading: `step` nodes, guarded steps, loops, and the four

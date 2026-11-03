@@ -66,6 +66,13 @@ export const GUARD = 'guard';
 /** A state's `entry`: what it sets on the way in, as `name = value` pieces. */
 export const ENTRY = 'entry';
 
+/**
+ * A `moves-to` edge's `sets`: what the model asserts holds after crossing, in the
+ * same `name = value` notation as `entry`. It asserts and never writes -- the values
+ * come from the states' own `entry` and `exit`, and this is checked against them.
+ */
+export const SETS = 'sets';
+
 /** A state's `exit`: what it sets on the way out. */
 export const EXIT = 'exit';
 
@@ -202,6 +209,10 @@ export const ARCHITECTURE: OntologySpec = {
         [GUARD]: {
           kind: 'string',
           doc: 'The condition under which the event takes this transition rather than another one leaving the same state. A name, never an expression.',
+        },
+        [SETS]: {
+          kind: 'string',
+          doc: 'What the model asserts holds after crossing, as `name = value` pieces. Nothing is written by it: the value comes from the states, and the assertion is checked against every path (see paths.ts).',
         },
       },
       doc: 'A transition. A state may move to itself, which is how a machine repeats an action without leaving.',

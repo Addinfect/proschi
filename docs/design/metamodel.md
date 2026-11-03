@@ -71,8 +71,8 @@ indistinguishable from a coincidence.
 | `element` | — | abstract; exists so relations can say "any structural thing" |
 | `module` | `element` | a unit of code with a boundary |
 | `interface` | `element` | a contract, depended on rather than known |
-| `machine` | `element` | drawn as a statechart, not as a box |
-| `state` | — | deliberately *not* an element: it belongs to one machine and appears in no structural view |
+| `machine` | `element` | drawn as a statechart, not as a box; declares `outputs`, the names it drives (`string`) |
+| `state` | — | deliberately *not* an element: it belongs to one machine and appears in no structural view. Declares what it writes — `entry`, `exit`, `do`, each a `string` list of `<output>=<constant>` pieces — plus `final` (`boolean`) and `overrides` (`string`, the id of the state it replaces) |
 
 | Relation | From → To | Rule |
 | --- | --- | --- |
@@ -82,7 +82,7 @@ indistinguishable from a coincidence.
 | `realizes` | module → interface | a module fulfils a contract |
 | `owns` | machine → state | `maxIn: 1` — one owner per state |
 | `starts-at` | machine → state | `maxOut: 1` — one entry state |
-| `moves-to` | state → state | self-loops allowed; declares `trigger` and `guard` as **edge attributes** — each one a name, never an expression |
+| `moves-to` | state → state | self-loops allowed; declares `trigger`, `guard` and `sets` as **edge attributes** — the first two are names, never expressions; `sets` writes nothing, it asserts what the outputs already hold on arrival |
 | `inherits` | machine → machine | `maxOut: 1`, `acyclic` — one parent, so what is inherited is never in doubt |
 
 Choosing between `uses` and `depends-on` is the whole product: a compile-time need
@@ -98,9 +98,25 @@ flagged `retargeted` — provenance is visible, not lost.
 
 Problems are values, never exceptions. The engine reports `cycle`, `missing-attribute`,
 `abstract-type`, `too-many-in` and the rest; the ontology layer adds
-`unknown-machine`, `inherits-cycle`, `unknown-override`, `initial-unknown` and one
-warning, `no-initial`. Each issue says which node, and the reading falls back to
-what it can still say — a broken machine still gets drawn.
+`unknown-machine`, `inherits-cycle`, `unknown-override`, `initial-unknown` and, as the
+only warning there, `no-initial`. Reading what a state writes adds
+`duplicate-output`, `bad-effect`, `unknown-output` and `duplicate-effect`; reading the
+transitions adds `duplicate-trigger`, `many-defaults` and the two path codes below.
+Each issue says which node, and the reading falls back to what it can still say — a
+broken machine still gets drawn.
+
+**What a variable holds.** A machine declares `outputs`; a state writes some of them
+on `entry` and `exit`; `readPaths` then answers, for every state and every output,
+which values can be there and by which transition each one arrived. The rule is one
+line — on arrival at `B` an output keeps `B.entry`, else the `A.exit` it was leaving
+with, else what it carried in — and the answer is the fixed point of that rule over
+the transitions `expandMachine` found, with the initial state seeded by its own
+`entry` and by nothing else. A value that no write ever puts there is `nothing`,
+which is also what a state that writes nothing carries onward. This is why `sets`
+on an edge is an assertion and not an effect: it is checked against the fixed point
+(`sets-contradicted` when the value is impossible, `sets-undecided` when the arrival
+is not determined) and can never change it. Unreachable states are marked rather
+than reported, and an output no state ever writes is `output-never-set`.
 
 ## 5. Two relations people conflate
 
@@ -127,7 +143,7 @@ is why the three can share one graph and one set of checks.
 | Gap | Why it is not closed yet |
 | --- | --- |
 | **Composite / orthogonal states** | Needs `owns` between states plus an entry rule. The metamodel can already express the edges; the reading in `expandMachine` does not walk them. |
-| **Unreachable states** | `expandMachine` reports a missing entry state but not a state no transition reaches. `reachableFrom` already exists. |
+| **Unreachable states** | `readPaths` marks each state `reachable: false` and says so when a `sets` assertion depends on it, but it raises no issue of its own — a state nobody reaches is worth reporting, and worth deciding whether it is an error. |
 | **Layer order** | `layer` is a closed list of words; it does not say that `presentation` may only depend on `application`. That is an order between types, which the metamodel cannot express. |
 | **Dead-dependency detector** | The draft's "declared `depends-on` but never `uses` — is it really a dependency?" is a cross-relation query nobody has written. |
 | **The existing cloud vocabulary** | `frontend/src/dsl/kinds.ts` (17 kinds: database, pipeline, instance, …) still stands beside this ontology. It is to become one more `OntologySpec` — the lower layer — with the file untouched until the views can read either. |

@@ -18,6 +18,7 @@ import {
   OUTPUTS,
   OWNS,
   OVERRIDES,
+  SETS,
   STARTS_AT,
   STATE,
   TRIGGER,
@@ -41,12 +42,15 @@ import {
  * are sound still come back with them -- the rule the engine's registry follows.
  */
 
-/** One output a state sets to a constant on the way in or out. */
+/** A constant a model may write: a number, a boolean, or the text between quotes. */
+export type Constant = string | number | boolean;
+
+/** One output a state sets to a constant on the way in or out, or an edge asserts. */
 export interface AssignmentView {
   /** Output name, as the machine declared it. */
   output: string;
   /** The constant assigned: a number, a boolean, or the text between quotes. */
-  value: string | number | boolean;
+  value: Constant;
 }
 
 /** One state as an expanded machine sees it. */
@@ -83,6 +87,11 @@ export interface TransitionView {
   trigger?: string;
   /** The condition that picks this transition among the ones leaving the same state. */
   guard?: string;
+  /**
+   * What the model asserts holds after crossing, as `name = value` pieces. An
+   * assertion, not a write: it changes nothing, it is checked (see paths.ts).
+   */
+  sets: readonly AssignmentView[];
   /** True when an override moved one end of the transition onto a replacing state. */
   retargeted: boolean;
 }
@@ -305,6 +314,7 @@ export function expandMachine(graph: Graph, machine: Id): MachineView {
       to,
       trigger: textOf(edge, TRIGGER) ?? edge.label,
       guard: textOf(edge, GUARD),
+      sets: parseEffects(textOf(edge, SETS), 'sets', edge.id, declaredOutput, issues),
       retargeted: from !== edge.source || to !== edge.target,
     });
   }
@@ -416,12 +426,19 @@ function listOf(node: Node, key: string): string[] {
 }
 
 /**
- * What a state writes on entering or leaving, read from one string.
+ * What a state writes on entering or leaving, or what an edge asserts, read from
+ * one string.
  *
  * The notation is deliberately two characters wide: `name = value` pieces separated
  * by `;`, and a value that is a number, `true`, `false` or a quoted string. Nothing
  * is evaluated, so a bare word is refused rather than quietly taken as text -- a
  * misspelling that becomes a signal is the failure this check exists to prevent.
+ *
+ * The subject is a state for `entry` and `exit` and an edge for `sets`, so the
+ * messages name it without claiming which kind it is. A name written twice in the
+ * same piece list is reported and the last piece kept: `a = 0; a = 1` reads as an
+ * afterthought, not as a dependence on order, and a silent override is the kind of
+ * thing a reader has to be told about.
  *
  * The cost of keeping this out of the engine is this function: the engine sees one
  * string attribute, and the subject matter -- that a state writes outputs -- is read
@@ -431,12 +448,13 @@ function listOf(node: Node, key: string): string[] {
 function parseEffects(
   written: string | undefined,
   key: string,
-  state: Id,
+  subject: Id,
   outputs: ReadonlySet<string>,
   issues: Issue[],
 ): AssignmentView[] {
   if (written === undefined) return [];
   const assignments: AssignmentView[] = [];
+  const seen = new Set<string>();
   for (const piece of written.split(';')) {
     const text = piece.trim();
     if (text.length === 0) continue;
@@ -447,8 +465,8 @@ function parseEffects(
       issues.push({
         severity: 'error',
         code: 'bad-effect',
-        subject: state,
-        message: `"${state}" writes "${text}" in its ${key}; a piece is \`name = value\` with a number, true, false or a quoted string.`,
+        subject,
+        message: `"${subject}" writes "${text}" in its ${key}; a piece is \`name = value\` with a number, true, false or a quoted string.`,
       });
       continue;
     }
@@ -456,11 +474,20 @@ function parseEffects(
       issues.push({
         severity: 'error',
         code: 'unknown-output',
-        subject: state,
-        message: `"${state}" sets "${name}" in its ${key}, which no machine in the chain declares in \`outputs\`.`,
+        subject,
+        message: `"${subject}" sets "${name}" in its ${key}, which no machine in the chain declares in \`outputs\`.`,
       });
       continue;
     }
+    if (seen.has(name)) {
+      issues.push({
+        severity: 'error',
+        code: 'duplicate-effect',
+        subject,
+        message: `"${subject}" writes "${name}" more than once in its ${key}; the last piece wins.`,
+      });
+    }
+    seen.add(name);
     assignments.push({ output: name, value });
   }
   return assignments;
@@ -470,7 +497,7 @@ function parseEffects(
  * The constant a value piece names, or nothing when it names no constant. Quoted
  * text is returned without its quotes, so a view can show it as written.
  */
-function constantOf(text: string): string | number | boolean | undefined {
+function constantOf(text: string): Constant | undefined {
   if (text === 'true') return true;
   if (text === 'false') return false;
   if (/^-?\d+(\.\d+)?$/.test(text)) return Number(text);

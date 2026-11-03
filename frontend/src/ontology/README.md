@@ -6,9 +6,11 @@ the vocabulary is cut this way, and what it cannot express yet, is in
 [`docs/design/metamodel.md`](../../../docs/design/metamodel.md).
 
 ```
-architecture.ts  ARCHITECTURE: types, relations, layer vocabulary — plain data
-expand.ts        expandMachine(): an inheritance chain flattened into one machine
+architecture.ts      ARCHITECTURE: types, relations, layer vocabulary — plain data
+expand.ts            expandMachine(): an inheritance chain flattened into one machine
+paths.ts             readPaths(): what each output may hold in each state, checked
 architecture.test.ts
+paths.test.ts
 ```
 
 ## One graph, three readings
@@ -126,6 +128,10 @@ misspelt output into `unknown-output` instead of a new signal:
   count, because a child that extends a machine still enters its states.
 - `duplicate-output` — one machine names the same output twice. A child redeclaring
   a parent's output is not this: that is the same output, not a second one.
+- `duplicate-effect` — one `entry`, `exit` or `sets` string writes the same name
+  twice. The list is kept as written and the last piece wins, because
+  `armed = 1; armed = 0` reads as an afterthought, not as an order to rely on. A
+  silent override is exactly what a reader has to be told about.
 
 Outputs are collected along the chain, own first and then inherited, so the same
 state is checked in the machine that declares it and again in every machine that
@@ -137,18 +143,82 @@ supported, although `docs/design/intent.md` §4 sketched it — that form needs 
 output names to be ontology attributes, which ties the ontology to one project's
 signals. One notation, not two.
 
+## What a variable holds in a state
+
+`paths.ts` answers that question, and it is a path question: there is no time in
+the model, so an output holds whatever the path into the state wrote last. Three
+rules, and they are all of it — cross a transition from `A` to `B`, and for output
+`o`:
+
+1. if `B.entry` writes `o`, `B` holds that constant: entering overrides what the
+   path carried;
+2. otherwise, if `A.exit` writes `o`, `B` holds that — an `exit` is a default for
+   successors that say nothing;
+3. otherwise `B` holds what `A` held, unchanged. A state that writes nothing keeps
+   everything, which is why waiting does not drive an output anywhere.
+
+The initial state is rule 1 alone: what it writes on entry, otherwise **nothing has
+written it yet** — which is not zero, and is reported as such.
+
+The answer is one output and state at a time, with every value the model allows
+and the transition that brought it:
+
+```
+in "wait" "drive" is 1 via "release" and 0 via "clear" and nothing via start
+```
+
+That sentence is the point of the exercise. A state that can hold two values is
+either a model that forgot to write the output on every path, or a model that is
+honestly path-dependent — and only the model can say which. `readPaths` reports
+the choice instead of making it. The value set is finite (what the states write),
+so the walk is a fixed point and terminates on cycles and self-loops.
+
+## `sets` asserts, it never writes
+
+A `moves-to` edge may carry `sets`, in the same notation as `entry`:
+
+```ts
+{ id: 'idle-busy', relation: MOVES_TO, source: 'idle', target: 'busy',
+  attributes: { [SETS]: 'armed = 1' } }
+```
+
+This is the model saying what it believes holds after crossing, and nothing is
+written by it: the values come from the states' `entry` and `exit`, always. Read
+that twice, because a reader coming from a programming language will assume it
+assigns.
+
+What is checked is the assertion against every path the model allows, and the
+three outcomes are the reason to write it down at all:
+
+- it agrees — one value crosses and it is the asserted one, so there is no issue;
+- `sets-undecided` (warning) — the asserted value is reachable, but so is another
+  one: the claim holds on some paths only. Also reported when nothing wrote the
+  output before the transition, so the value might be *nothing*.
+- `sets-contradicted` (error) — the assertion cannot hold on any path.
+
+`output-never-set` is the cheap companion warning: a machine declares an output
+and no state ever writes it, so it keeps whatever it held before the machine
+started. For a hardware model that silence usually means a state is missing.
+
 ## Known gaps
 
 - **No composite states.** A machine is flat. Nesting means an `owns` edge from
   state to state, plus a rule that the child machine's `starts-at` is entered on
-  entry — neither is declared.
-- **No reachability check.** `expandMachine` reports a missing initial state, but
-  not a state no transition can reach. The engine already has `reachableFrom`;
-  wiring it in is a few lines once a view wants to show it.
-- **`entry` / `exit` are not read along a path.** The assignments are parsed and
-  their names checked, but nothing yet says what a variable holds in a given state:
-  no path walk, no third check outcome, no contradiction between a declared change
-  and what the states imply. That is the rest of §4 and the next step.
+  entry — neither is declared. Everything in `paths.ts` assumes a flat machine, so
+  this is the next thing that changes it.
+- **No reachability issue.** `readPaths` reports a state no path arrives at
+  (`reachable: false`, no values) and `expandMachine` reports a missing initial
+  state, but neither reports an unreachable state as an issue of its own — the
+  warning waits until a view needs to draw it.
+- **No arithmetic and no timing.** An output is set to a constant and only that.
+  Nothing computes `armed + 1`, and nothing says how long a state is held, so a
+  statement about a value that is only true *while a transition is crossing* cannot
+  be written and is not checked. `exit` is the closest the vocabulary gets, and it
+  is a default for the successor rather than an event.
+- **Nothing has no type.** An output nobody has written yet is reported as
+  *nothing*, not as `0` or `false`. That is honest for a model that does not say
+  what an output is before the machine starts, and it means an initial-state `entry`
+  is the only way to pin a value down.
 - **Guard overlap is not checked.** Two guards on the same event are accepted,
   and whether both can hold at once is never asked: a guard is a name, and
   deciding that needs the requirement predicates the model does not carry yet.
@@ -158,6 +228,9 @@ signals. One notation, not two.
 
 ## Reading order
 
-`architecture.ts` is data and can be read top to bottom. `expand.ts` is the only
-place with logic, and its shape is: collect the chain, flatten the states, resolve
-the transitions, then check that leaving each state is decidable.
+`architecture.ts` is data and can be read top to bottom. `expand.ts` collects the
+chain, flattens the states, resolves the transitions and checks that leaving each
+state is decidable. `paths.ts` takes that expanded machine and reads it along its
+paths: reachability first, then the values per state and output, then the
+assertions. It does not consult the graph, so nothing it says depends on how the
+model was written down.
