@@ -15,7 +15,8 @@ import type { OntologySpec } from '../engine';
  * - Flow: the same nodes followed along `uses`, read as a sequence of steps
  *   rather than as a dependency order.
  * - Behaviour: `machine` nodes own `state` nodes, `moves-to` edges are
- *   transitions, and a machine may `inherits` another to take over its behaviour
+ *   transitions, a state may `contains` other states so that a machine has
+ *   sub-states, and a machine may `inherits` another to take over its behaviour
  *   and override parts of it (see expand.ts).
  *
  * `element` is the one abstract type: it exists so that `depends-on`, `uses` and
@@ -51,7 +52,19 @@ export const REALIZES = 'realizes';
 /** The state belongs to the machine. */
 export const OWNS = 'owns';
 
-/** The state the machine is in before anything happens. */
+/**
+ * The target is one of the states inside the source, so a state may have sub-states.
+ * One container per state and no cycles: the states of a machine form a tree, and a
+ * contained state is still owned by the machine (see OWNS) -- `contains` only says
+ * where inside it the state sits.
+ */
+export const CONTAINS = 'contains';
+
+/**
+ * The state the machine or the state is in before anything happens. On a machine it
+ * names the state the machine starts in; on a state with states inside it, the one
+ * the machine enters first when it enters the container.
+ */
 export const STARTS_AT = 'starts-at';
 
 /** A transition from one state to another. */
@@ -132,7 +145,7 @@ export const ARCHITECTURE: OntologySpec = {
     },
     {
       name: 'state',
-      doc: 'One state a machine may be in. It has exactly one owning machine or it is not part of any statechart.',
+      doc: 'One state a machine may be in. It has exactly one owning machine or it is not part of any statechart. A state may also contain other states, and then it is a level of the statechart rather than a state the machine can be in.',
       attributes: {
         final: { kind: 'boolean', doc: 'True when the machine may stop here.' },
         overrides: {
@@ -187,14 +200,23 @@ export const ARCHITECTURE: OntologySpec = {
       source: [MACHINE],
       target: [STATE],
       maxIn: 1,
-      doc: 'The state belongs to the machine. Two owners is a modelling mistake, not two readings of the same state.',
+      doc: 'The state belongs to the machine. Two owners is a modelling mistake, not two readings of the same state. A state inside another one is still owned by its machine; `contains` says where it sits, not whose it is.',
+    },
+    {
+      name: CONTAINS,
+      source: [STATE],
+      target: [STATE],
+      maxIn: 1,
+      acyclic: true,
+      allowSelfLoops: false,
+      doc: 'The target is one of the states inside the source. One container per state and nothing contains itself, so the states of a machine form a tree.',
     },
     {
       name: STARTS_AT,
-      source: [MACHINE],
+      source: [MACHINE, STATE],
       target: [STATE],
       maxOut: 1,
-      doc: 'The state the machine is in before anything happens.',
+      doc: 'The state the machine is in before anything happens. A state that contains states says the same about itself: which of them it starts in.',
     },
     {
       name: MOVES_TO,

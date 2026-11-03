@@ -4,6 +4,7 @@ import {
   ACTIVITY,
   ARCHITECTURE,
   COMPOSES,
+  CONTAINS,
   DEPENDS_ON,
   ENTRY,
   EXIT,
@@ -274,6 +275,123 @@ describe('expanding a machine', () => {
     expect(expandMachine(machines, 'nowhere').issues.map((issue) => issue.code)).toEqual([
       'unknown-machine',
     ]);
+  });
+});
+
+describe('a state inside a state', () => {
+  /** One container with two states in it, and a machine that starts inside it. */
+  const nested: Graph = {
+    nodes: [
+      { id: 'machine', type: MACHINE },
+      { id: 'running', type: STATE },
+      { id: 'spinning', type: STATE },
+      { id: 'braking', type: STATE },
+    ],
+    edges: [
+      { id: 'machine-owns-running', relation: OWNS, source: 'machine', target: 'running' },
+      { id: 'machine-owns-spinning', relation: OWNS, source: 'machine', target: 'spinning' },
+      { id: 'machine-owns-braking', relation: OWNS, source: 'machine', target: 'braking' },
+      {
+        id: 'running-contains-spinning',
+        relation: CONTAINS,
+        source: 'running',
+        target: 'spinning',
+      },
+      { id: 'machine-starts', relation: STARTS_AT, source: 'machine', target: 'running' },
+      { id: 'running-starts', relation: STARTS_AT, source: 'running', target: 'spinning' },
+    ],
+  };
+
+  it('accepts a state inside another, and both of them saying where they start', () => {
+    expect(validateGraph(ontology, nested)).toEqual([]);
+  });
+
+  it('still makes a contained state belong to the machine', () => {
+    // Ownership and containment are different questions: the machine owns the state,
+    // `contains` only says where inside the machine it sits.
+    const graphed: Graph = {
+      nodes: nested.nodes,
+      edges: [
+        ...nested.edges,
+        { id: 'running-owns-braking', relation: OWNS, source: 'running', target: 'braking' },
+      ],
+    };
+    expect(codesOf(graphed)).toEqual(['relation-source']);
+  });
+
+  it('gives a state one container at most', () => {
+    expect(
+      codesOf(
+        withEdge(nested, {
+          id: 'braking-contains-spinning',
+          relation: CONTAINS,
+          source: 'braking',
+          target: 'spinning',
+        }),
+      ),
+    ).toEqual(['too-many-in']);
+  });
+
+  it('lets only states hold states', () => {
+    expect(
+      codesOf(
+        withEdge(nested, {
+          id: 'machine-contains-braking',
+          relation: CONTAINS,
+          source: 'machine',
+          target: 'braking',
+        }),
+      ),
+    ).toEqual(['relation-source']);
+    expect(
+      codesOf(
+        withEdge(nested, {
+          id: 'running-contains-machine',
+          relation: CONTAINS,
+          source: 'running',
+          target: 'machine',
+        }),
+      ),
+    ).toEqual(['relation-target']);
+  });
+
+  it('refuses a state that contains itself', () => {
+    expect(
+      codesOf(
+        withEdge(nested, {
+          id: 'running-contains-running',
+          relation: CONTAINS,
+          source: 'running',
+          target: 'running',
+        }),
+      ),
+    ).toEqual(['self-loop']);
+  });
+
+  it('refuses a tree of states that closes on itself', () => {
+    expect(
+      codesOf(
+        withEdge(nested, {
+          id: 'spinning-contains-running',
+          relation: CONTAINS,
+          source: 'spinning',
+          target: 'running',
+        }),
+      ),
+    ).toEqual(['cycle']);
+  });
+
+  it('lets a state say one place it starts, not two', () => {
+    expect(
+      codesOf(
+        withEdge(nested, {
+          id: 'running-starts-braking',
+          relation: STARTS_AT,
+          source: 'running',
+          target: 'braking',
+        }),
+      ),
+    ).toEqual(['too-many-out']);
   });
 });
 
