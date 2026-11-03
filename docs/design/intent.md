@@ -217,7 +217,10 @@ which is cheaper than a human writing predicates.
    `no-entry`; `many-parents` and `initial-unknown` reused for the hierarchy.
    **Orthogonal regions are still open** — a tree holds one state at a time, and two
    aspects at once is a second relation, not a reading.
-4. **`src/views/` with a scope** (§3) — structure, behaviour, control flow.
+4. **`src/views/` with a scope** (§3) — the scope is read: `views/scope.ts` draws one
+   level of a tree, folding what is deeper, lifting what leaves the scope and
+   collapsing what leaves the same way without losing the count. Structure, behaviour
+   and control flow on top of it are the next piece, and they are renderers.
 5. **Control flow** as a reading: `step` nodes, guarded steps, loops, and the four
    cheap findings — missing else, unreachable step, loop with no exit, two guards
    that can both fire.

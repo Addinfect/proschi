@@ -21,7 +21,7 @@ Four layers, each knowing only the one below:
 | --- | --- | --- |
 | Engine | `frontend/src/engine/` | nodes, edges, types, relations, checks |
 | Ontology | `frontend/src/ontology/` | the subject matter, as data |
-| View | `frontend/src/views/` *(not written yet)* | how to draw a graph for a reader |
+| View | `frontend/src/views/` | how to draw a graph for a reader |
 
 There is no model layer: the editor keeps the text, and the engine takes the
 graph as an argument on every call. `frontend/src/model/` already exists and
@@ -155,6 +155,16 @@ it.
 A view reads the model and never owns data, and it may not add a rule the ontology
 does not declare. Adding a view is therefore a renderer, not a second model — which
 is why the three can share one graph and one set of checks.
+
+The piece all three share is written: `views/scope.ts` reads **one level of a tree**,
+as a reader has opened it. `composes` and `contains` are those trees, and a scope is
+a node that is opened or nothing for the top level. What sits deeper is folded into
+its box; an edge with an end outside the scope is lifted to the boundary and marked
+`crosses`; edges lifted the same way are one edge with a `count` and its `members`,
+so collapsing three arrows into one does not lose the three. The spec names relations
+and not types, so the same function reads the cloud vocabulary the day it becomes an
+`OntologySpec`. A broken tree is not a view's finding: the only issue a scope raises
+is `unknown-root`.
 
 ## 7. What is still open
 
