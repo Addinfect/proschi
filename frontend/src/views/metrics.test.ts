@@ -254,7 +254,7 @@ describe('the spike model, measured', () => {
         "crossings": {
           "detour": 23,
           "grid": 5,
-          "mixed": 18,
+          "mixed": 11,
         },
       }
     `);
@@ -277,12 +277,254 @@ describe('the spike model, measured', () => {
       {
         "area": 554944,
         "bends": 48,
-        "crossings": 46,
-        "crowding": 2,
+        "crossings": 39,
+        "crowding": 1,
         "labelsOnBox": 0,
         "labelsTogether": 0,
-        "shared": 0,
+        "shared": 1,
       }
     `);
   });
 });
+
+/*
+ * TEMPORARY -- delete once it has answered its question.
+ *
+ * The counts above say how many crossings there are, and `costSplit` says whether a
+ * detour stands on one side of them. Neither says *which leg* does the crossing, and
+ * that is the only thing that decides what to change next: a crossing made by the
+ * channel run is a channel problem, one made by an entry run is a lane problem, and
+ * they are fixed in different parts of the router.
+ *
+ * The runs below are read exactly the way `metrics.ts` reads them -- same rule for what
+ * counts as a crossing -- so that the total here and the promise up there cannot drift
+ * apart. What is added is a name for each run: where it sits in its own route. The name
+ * is read off the shape, not off the path index, so a point `simplify` dropped does not
+ * shift the answer.
+ */
+
+/** One straight run of one arrow, named by its part in that arrow. */
+interface Run {
+  /** Which arrow it belongs to, so that an arrow is never measured against itself. */
+  readonly owner: number;
+  /** The arrow in full, as `from->to[kind]`, so a line of output can be read alone. */
+  readonly own: string;
+  /** Which leg of the route this is: `exit`, `channel`, `across-in`, and so on. */
+  readonly role: string;
+  readonly vertical: boolean;
+  readonly from: number;
+  readonly to: number;
+  /** The coordinate it sits at: its x when it is vertical, its y when it is horizontal. */
+  readonly at: number;
+}
+
+/**
+ * What a run is doing, in the words the router already uses. A route drawn by
+ * `forward` has one vertical run on each side of one horizontal one, so the first and
+ * last vertical are the leaving and the arriving run; a detour has a third vertical in
+ * between, which is the channel. Counted per direction rather than by index, because
+ * `simplify` is free to drop a point and a name must not depend on that.
+ */
+function roleOf(kind: EdgeKind, vertical: boolean, index: number, count: number): string {
+  if (kind === 'cross') return 'wall';
+  if (kind === 'self') return vertical ? 'loop-riser' : index === 0 ? 'loop-out' : 'loop-in';
+  if (vertical) {
+    if (count === 1) return 'riser';
+    if (index === 0) return 'exit';
+    if (index === count - 1) return 'entry';
+    return 'channel';
+  }
+  if (count === 1) return 'lane';
+  if (index === 0) return 'across-out';
+  if (index === count - 1) return 'across-in';
+  return 'across';
+}
+
+/** Every run in the drawing, named. Diagonal legs are left out: no count here sees them. */
+function runs(layout: ScopeLayout): Run[] {
+  const out: Run[] = [];
+  layout.edges.forEach((edge, owner) => {
+    const own = `${edge.from}->${edge.to}[${edge.kind}]`;
+    const legs: { vertical: boolean; from: number; to: number; at: number }[] = [];
+    for (let at = 1; at < edge.path.length; at += 1) {
+      const a: Point | undefined = edge.path[at - 1];
+      const b: Point | undefined = edge.path[at];
+      if (a === undefined || b === undefined) continue;
+      if (a.x !== b.x && a.y !== b.y) continue;
+      const vertical = a.x === b.x;
+      const first = vertical ? a.y : a.x;
+      const second = vertical ? b.y : b.x;
+      legs.push({
+        vertical,
+        from: Math.min(first, second),
+        to: Math.max(first, second),
+        at: vertical ? a.x : a.y,
+      });
+    }
+    const verticals = legs.filter((leg) => leg.vertical);
+    const horizontals = legs.filter((leg) => !leg.vertical);
+    for (const leg of legs) {
+      const peers = leg.vertical ? verticals : horizontals;
+      out.push({
+        owner,
+        own,
+        role: roleOf(edge.kind, leg.vertical, peers.indexOf(leg), peers.length),
+        vertical: leg.vertical,
+        from: leg.from,
+        to: leg.to,
+        at: leg.at,
+      });
+    }
+  });
+  return out;
+}
+
+/** The same test `metrics.ts` makes: both coordinates strictly inside the other run. */
+function hits(first: Run, second: Run): boolean {
+  if (first.vertical === second.vertical) return false;
+  const vertical = first.vertical ? first : second;
+  const horizontal = first.vertical ? second : first;
+  return (
+    vertical.at > horizontal.from &&
+    vertical.at < horizontal.to &&
+    horizontal.at > vertical.from &&
+    horizontal.at < vertical.to
+  );
+}
+
+/** A run as one token: what it belongs to, what it is, and where it sits. */
+function named(run: Run): string {
+  return `${run.role} ${run.vertical ? 'x' : 'y'}=${run.at} of ${run.own}`;
+}
+
+/** Every crossing, each as the pair of runs that make it. */
+function crossingsOf(layout: ScopeLayout): [Run, Run][] {
+  const all = runs(layout);
+  const found: [Run, Run][] = [];
+  all.forEach((first, at) => {
+    for (let further = at + 1; further < all.length; further += 1) {
+      const second = all[further];
+      if (second === undefined || second.owner === first.owner) continue;
+      if (hits(first, second)) found.push([first, second]);
+    }
+  });
+  return found;
+}
+
+describe('the spike model, crossing by crossing', () => {
+  it('reads the crossings the measure counts', () => {
+    // If these ever disagree, every line below is about a different picture than the
+    // numbers above, and the diagnosis is worth nothing.
+    const layout = spike();
+    expect(crossingsOf(layout).length).toBe(measure(layout).crossings);
+  });
+
+  it('names the leg on each side of every crossing', () => {
+    const found = crossingsOf(spike());
+    const groups = new Map<string, string[]>();
+    for (const [first, second] of found) {
+      const pair = [first.role, second.role].sort().join(' x ');
+      const lines = groups.get(pair) ?? [];
+      lines.push(`${named(first)}  with  ${named(second)}`);
+      groups.set(pair, lines);
+    }
+    const ranked = [...groups]
+      .map(([pair, lines]) => ({ pair, count: lines.length, lines: [...lines].sort() }))
+      .sort((left, right) => right.count - left.count || left.pair.localeCompare(right.pair));
+    expect({ total: found.length, ranked }).toMatchInlineSnapshot(`
+      {
+        "ranked": [
+          {
+            "count": 14,
+            "lines": [
+              "across-in y=344 of storefront->catalog[around]  with  channel x=168 of backoffice->ledger[around]",
+              "across-in y=344 of storefront->catalog[around]  with  channel x=184 of backoffice->bus[around]",
+              "across-in y=344 of storefront->catalog[around]  with  channel x=209 of checkout->ledger[around]",
+              "across-in y=344 of storefront->catalog[around]  with  channel x=225 of checkout->bus[around]",
+              "across-in y=488 of backoffice->bus[around]  with  channel x=209 of checkout->ledger[around]",
+              "across-in y=488 of backoffice->bus[around]  with  channel x=225 of checkout->bus[around]",
+              "across-in y=488 of backoffice->bus[around]  with  channel x=289 of payments->ledger[around]",
+              "across-in y=488 of backoffice->bus[around]  with  channel x=305 of payments->ledger[around]",
+              "across-in y=504 of checkout->bus[around]  with  channel x=289 of payments->ledger[around]",
+              "across-in y=504 of checkout->bus[around]  with  channel x=305 of payments->ledger[around]",
+              "across-in y=600 of backoffice->ledger[around]  with  channel x=209 of checkout->ledger[around]",
+              "across-in y=600 of backoffice->ledger[around]  with  channel x=289 of payments->ledger[around]",
+              "across-in y=600 of backoffice->ledger[around]  with  channel x=305 of payments->ledger[around]",
+              "across-in y=632 of checkout->ledger[around]  with  channel x=289 of payments->ledger[around]",
+            ],
+            "pair": "across-in x channel",
+          },
+          {
+            "count": 7,
+            "lines": [
+              "exit x=226 of backoffice->checkout[forward]  with  across-out y=104 of backoffice->bus[around]",
+              "exit x=226 of backoffice->checkout[forward]  with  across-out y=120 of backoffice->ledger[around]",
+              "exit x=267 of checkout->catalog[forward]  with  across-out y=280 of checkout->bus[around]",
+              "exit x=267 of checkout->catalog[forward]  with  across-out y=296 of checkout->ledger[around]",
+              "exit x=305 of catalog->bus[forward]  with  across-out y=440 of payments->ledger[around]",
+              "exit x=465 of payments->bus[forward]  with  across-out y=440 of payments->ledger[around]",
+              "exit x=83 of storefront->checkout[forward]  with  across-out y=88 of storefront->catalog[around]",
+            ],
+            "pair": "across-out x exit",
+          },
+          {
+            "count": 6,
+            "lines": [
+              "entry x=342 of backoffice->ledger[around]  with  across-in y=616 of payments->ledger[around]",
+              "entry x=342 of backoffice->ledger[around]  with  across-in y=632 of checkout->ledger[around]",
+              "entry x=342 of backoffice->ledger[around]  with  across-in y=648 of payments->ledger[around]",
+              "entry x=347 of backoffice->bus[around]  with  across-in y=504 of checkout->bus[around]",
+              "entry x=364 of checkout->ledger[around]  with  across-in y=648 of payments->ledger[around]",
+              "entry x=406 of payments->ledger[around]  with  across-in y=648 of payments->ledger[around]",
+            ],
+            "pair": "across-in x entry",
+          },
+          {
+            "count": 3,
+            "lines": [
+              "channel x=184 of backoffice->bus[around]  with  across-out y=120 of backoffice->ledger[around]",
+              "channel x=225 of checkout->bus[around]  with  across-out y=296 of checkout->ledger[around]",
+              "channel x=305 of payments->ledger[around]  with  across-out y=440 of payments->ledger[around]",
+            ],
+            "pair": "across-out x channel",
+          },
+          {
+            "count": 3,
+            "lines": [
+              "entry x=273 of storefront->checkout[forward]  with  lane y=152 of backoffice->checkout[forward]",
+              "entry x=305 of backoffice->checkout[forward]  with  lane y=184 of backoffice->identity[forward]",
+              "lane y=184 of backoffice->identity[forward]  with  entry x=337 of partner-integration-gateway->checkout[forward]",
+            ],
+            "pair": "entry x lane",
+          },
+          {
+            "count": 2,
+            "lines": [
+              "across-in y=616 of payments->ledger[around]  with  riser x=385 of bus->ledger[forward]",
+              "across-in y=648 of payments->ledger[around]  with  riser x=385 of bus->ledger[forward]",
+            ],
+            "pair": "across-in x riser",
+          },
+          {
+            "count": 2,
+            "lines": [
+              "lane y=136 of storefront->checkout[forward]  with  channel x=168 of backoffice->ledger[around]",
+              "lane y=136 of storefront->checkout[forward]  with  channel x=184 of backoffice->bus[around]",
+            ],
+            "pair": "channel x lane",
+          },
+          {
+            "count": 2,
+            "lines": [
+              "lane y=136 of storefront->checkout[forward]  with  exit x=226 of backoffice->checkout[forward]",
+              "lane y=152 of backoffice->checkout[forward]  with  exit x=302 of backoffice->identity[forward]",
+            ],
+            "pair": "exit x lane",
+          },
+        ],
+        "total": 39,
+      }
+    `);
+  });
+});
+
