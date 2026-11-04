@@ -630,26 +630,46 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
     }
   });
   for (const side of sides.values()) {
-    // Where the other end stands, which is what the anchor has to line up with. An end
-    // outside this level has no place to line up with, so it takes the last anchor of
-    // the side rather than shoving an arrow that does land out of line.
+    // Which seat along the wall an arrow takes, by the angle between the two ends. Two
+    // arrows must stand in the order in which they arrive: the one that has to reach past
+    // the other's turn has to start outside it, and no route can fix that afterwards. Where
+    // a far end sits relative to another is decided by two distances -- how far left, and
+    // how far away -- so any fixed order between them answers one case wrong. Sorting by x
+    // first puts a deep arrow with a small lead inside a shallow one with a wide lead;
+    // sorting by depth first does the same the other way round. The angle weighs both at
+    // once, which is what a seat along a wall is: the slope from here to there, not one of
+    // its two legs.
+    //
+    // It is not the slope of the drawn arrow. That arrow is a zigzag on the grid and no
+    // straight line joins its ends; what is read here is where the two ends stand, which is
+    // all this sort knows. Read against the vertical and not the horizontal, because the
+    // seat along a horizontal wall is an x and must run left to right whether the arrow
+    // lands on the top of the box or climbs into the bottom of it.
     const beyond = Number.POSITIVE_INFINITY;
-    const farEnd = new Map<Attachment, number>();
+    const angle = new Map<Attachment, number>();
     const travel = new Map<Attachment, number>();
     for (const slot of side) {
       const far = byId.get(slot.end === 'from' ? slot.edge.to : slot.edge.from);
       const here = byId.get(slot.end === 'from' ? slot.edge.from : slot.edge.to);
-      farEnd.set(slot, far === undefined ? beyond : far.x + far.width / 2);
-      travel.set(slot, far === undefined || here === undefined ? 0 : Math.abs(far.y - here.y));
+      // An end outside this level has no place to line up with, so it keeps the far seat
+      // rather than shoving an arrow that does land out of line.
+      if (far === undefined || here === undefined) {
+        angle.set(slot, beyond);
+        travel.set(slot, 0);
+        continue;
+      }
+      const dx = far.x + far.width / 2 - (here.x + here.width / 2);
+      const dy = Math.abs(far.y + far.height / 2 - (here.y + here.height / 2));
+      angle.set(slot, Math.atan2(dx, dy));
+      travel.set(slot, dy);
     }
-    // Where the far ends line up the far centre says nothing: three arrows into three
-    // boxes that stand in one column all land on one x, and a plain sort would then let
-    // the order the model declares them in decide where each arrow leaves its box. The
-    // tie goes to the arrow with the longer run -- it takes the outer seat, so its leg
-    // clears the shorter ones' turns instead of crossing them.
+    // Two arrows that stand on one ray -- the same angle, one nearer -- still need an
+    // order, and they are the case the angle cannot separate: how far along the ray a far
+    // end sits is not part of its direction. The tie goes to the arrow with the longer run,
+    // which takes the outer seat, so its leg clears the shorter one's turn.
     const ordered = [...side].sort(
       (left, right) =>
-        (farEnd.get(left) ?? 0) - (farEnd.get(right) ?? 0) ||
+        (angle.get(left) ?? 0) - (angle.get(right) ?? 0) ||
         (travel.get(right) ?? 0) - (travel.get(left) ?? 0),
     );
     ordered.forEach((slot, i) => {
