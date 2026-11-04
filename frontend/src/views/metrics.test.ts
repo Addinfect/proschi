@@ -249,12 +249,12 @@ describe('the spike model, measured', () => {
       {
         "bends": {
           "detour": 28,
-          "grid": 20,
+          "grid": 22,
         },
         "crossings": {
-          "detour": 23,
-          "grid": 5,
-          "mixed": 11,
+          "detour": 9,
+          "grid": 1,
+          "mixed": 18,
         },
       }
     `);
@@ -275,13 +275,13 @@ describe('the spike model, measured', () => {
       area: metrics.area,
     }).toMatchInlineSnapshot(`
       {
-        "area": 554944,
-        "bends": 48,
-        "crossings": 39,
-        "crowding": 1,
+        "area": 625600,
+        "bends": 50,
+        "crossings": 28,
+        "crowding": 0,
         "labelsOnBox": 0,
         "labelsTogether": 0,
-        "shared": 1,
+        "shared": 0,
       }
     `);
   });
@@ -435,94 +435,71 @@ describe('the spike model, crossing by crossing', () => {
       {
         "ranked": [
           {
-            "count": 14,
+            "count": 9,
             "lines": [
-              "across-in y=344 of storefront->catalog[around]  with  channel x=168 of backoffice->ledger[around]",
-              "across-in y=344 of storefront->catalog[around]  with  channel x=184 of backoffice->bus[around]",
-              "across-in y=344 of storefront->catalog[around]  with  channel x=209 of checkout->ledger[around]",
-              "across-in y=344 of storefront->catalog[around]  with  channel x=225 of checkout->bus[around]",
-              "across-in y=488 of backoffice->bus[around]  with  channel x=209 of checkout->ledger[around]",
-              "across-in y=488 of backoffice->bus[around]  with  channel x=225 of checkout->bus[around]",
-              "across-in y=488 of backoffice->bus[around]  with  channel x=289 of payments->ledger[around]",
-              "across-in y=488 of backoffice->bus[around]  with  channel x=305 of payments->ledger[around]",
-              "across-in y=504 of checkout->bus[around]  with  channel x=289 of payments->ledger[around]",
-              "across-in y=504 of checkout->bus[around]  with  channel x=305 of payments->ledger[around]",
-              "across-in y=600 of backoffice->ledger[around]  with  channel x=209 of checkout->ledger[around]",
-              "across-in y=600 of backoffice->ledger[around]  with  channel x=289 of payments->ledger[around]",
-              "across-in y=600 of backoffice->ledger[around]  with  channel x=305 of payments->ledger[around]",
-              "across-in y=632 of checkout->ledger[around]  with  channel x=289 of payments->ledger[around]",
+              "channel x=248 of backoffice->bus[around]  with  lane y=168 of partner-integration-gateway->checkout[forward]",
+              "channel x=248 of backoffice->bus[around]  with  lane y=328 of checkout->payments[forward]",
+              "channel x=248 of backoffice->bus[around]  with  lane y=472 of payments->bus[forward]",
+              "channel x=280 of backoffice->ledger[around]  with  lane y=168 of partner-integration-gateway->checkout[forward]",
+              "channel x=280 of backoffice->ledger[around]  with  lane y=328 of checkout->payments[forward]",
+              "channel x=280 of backoffice->ledger[around]  with  lane y=472 of payments->bus[forward]",
+              "lane y=152 of backoffice->checkout[forward]  with  channel x=248 of backoffice->bus[around]",
+              "lane y=152 of backoffice->checkout[forward]  with  channel x=280 of backoffice->ledger[around]",
+              "lane y=472 of payments->bus[forward]  with  channel x=264 of payments->ledger[around]",
             ],
-            "pair": "across-in x channel",
+            "pair": "channel x lane",
           },
           {
             "count": 7,
             "lines": [
-              "exit x=226 of backoffice->checkout[forward]  with  across-out y=104 of backoffice->bus[around]",
-              "exit x=226 of backoffice->checkout[forward]  with  across-out y=120 of backoffice->ledger[around]",
-              "exit x=267 of checkout->catalog[forward]  with  across-out y=280 of checkout->bus[around]",
-              "exit x=267 of checkout->catalog[forward]  with  across-out y=296 of checkout->ledger[around]",
-              "exit x=305 of catalog->bus[forward]  with  across-out y=440 of payments->ledger[around]",
-              "exit x=465 of payments->bus[forward]  with  across-out y=440 of payments->ledger[around]",
-              "exit x=83 of storefront->checkout[forward]  with  across-out y=88 of storefront->catalog[around]",
+              "exit x=130 of checkout->catalog[forward]  with  across-out y=280 of checkout->bus[around]",
+              "exit x=130 of checkout->catalog[forward]  with  across-out y=296 of checkout->ledger[around]",
+              "exit x=147 of storefront->checkout[forward]  with  across-out y=88 of storefront->catalog[around]",
+              "exit x=168 of catalog->bus[forward]  with  across-out y=424 of payments->ledger[around]",
+              "exit x=322 of backoffice->checkout[forward]  with  across-out y=104 of backoffice->bus[around]",
+              "exit x=322 of backoffice->checkout[forward]  with  across-out y=120 of backoffice->ledger[around]",
+              "exit x=360 of payments->bus[forward]  with  across-out y=440 of payments->ledger[around]",
             ],
             "pair": "across-out x exit",
           },
           {
-            "count": 6,
+            "count": 5,
             "lines": [
-              "entry x=342 of backoffice->ledger[around]  with  across-in y=616 of payments->ledger[around]",
-              "entry x=342 of backoffice->ledger[around]  with  across-in y=632 of checkout->ledger[around]",
-              "entry x=342 of backoffice->ledger[around]  with  across-in y=648 of payments->ledger[around]",
-              "entry x=347 of backoffice->bus[around]  with  across-in y=504 of checkout->bus[around]",
-              "entry x=364 of checkout->ledger[around]  with  across-in y=648 of payments->ledger[around]",
-              "entry x=406 of payments->ledger[around]  with  across-in y=648 of payments->ledger[around]",
+              "across-in y=344 of storefront->catalog[around]  with  channel x=56 of checkout->bus[around]",
+              "across-in y=344 of storefront->catalog[around]  with  channel x=72 of checkout->ledger[around]",
+              "across-in y=504 of checkout->bus[around]  with  channel x=72 of checkout->ledger[around]",
+              "across-in y=504 of checkout->bus[around]  with  channel x=88 of payments->ledger[around]",
+              "across-in y=600 of backoffice->ledger[around]  with  channel x=264 of payments->ledger[around]",
+            ],
+            "pair": "across-in x channel",
+          },
+          {
+            "count": 3,
+            "lines": [
+              "across-in y=488 of backoffice->bus[around]  with  entry x=206 of payments->bus[forward]",
+              "across-in y=616 of payments->ledger[around]  with  entry x=147 of bus->ledger[forward]",
+              "entry x=168 of backoffice->ledger[around]  with  across-in y=616 of payments->ledger[around]",
             ],
             "pair": "across-in x entry",
           },
           {
             "count": 3,
             "lines": [
-              "channel x=184 of backoffice->bus[around]  with  across-out y=120 of backoffice->ledger[around]",
-              "channel x=225 of checkout->bus[around]  with  across-out y=296 of checkout->ledger[around]",
-              "channel x=305 of payments->ledger[around]  with  across-out y=440 of payments->ledger[around]",
+              "channel x=248 of backoffice->bus[around]  with  across-out y=424 of payments->ledger[around]",
+              "channel x=280 of backoffice->ledger[around]  with  across-out y=424 of payments->ledger[around]",
+              "channel x=280 of backoffice->ledger[around]  with  across-out y=440 of payments->ledger[around]",
             ],
             "pair": "across-out x channel",
           },
           {
-            "count": 3,
+            "count": 1,
             "lines": [
-              "entry x=273 of storefront->checkout[forward]  with  lane y=152 of backoffice->checkout[forward]",
-              "entry x=305 of backoffice->checkout[forward]  with  lane y=184 of backoffice->identity[forward]",
-              "lane y=184 of backoffice->identity[forward]  with  entry x=337 of partner-integration-gateway->checkout[forward]",
-            ],
-            "pair": "entry x lane",
-          },
-          {
-            "count": 2,
-            "lines": [
-              "across-in y=616 of payments->ledger[around]  with  riser x=385 of bus->ledger[forward]",
-              "across-in y=648 of payments->ledger[around]  with  riser x=385 of bus->ledger[forward]",
-            ],
-            "pair": "across-in x riser",
-          },
-          {
-            "count": 2,
-            "lines": [
-              "lane y=136 of storefront->checkout[forward]  with  channel x=168 of backoffice->ledger[around]",
-              "lane y=136 of storefront->checkout[forward]  with  channel x=184 of backoffice->bus[around]",
-            ],
-            "pair": "channel x lane",
-          },
-          {
-            "count": 2,
-            "lines": [
-              "lane y=136 of storefront->checkout[forward]  with  exit x=226 of backoffice->checkout[forward]",
-              "lane y=152 of backoffice->checkout[forward]  with  exit x=302 of backoffice->identity[forward]",
+              "exit x=398 of backoffice->identity[forward]  with  lane y=168 of partner-integration-gateway->checkout[forward]",
             ],
             "pair": "exit x lane",
           },
         ],
-        "total": 39,
+        "total": 28,
       }
     `);
   });

@@ -21,8 +21,8 @@ import type { ScopeEdge, ScopeView } from './scope';
  * The space between two ranks is where the arrows live, and every horizontal leg runs
  * in one. A leg along a rank would pass through the boxes standing in it, and a line
  * drawn through a box is a claim about that box. So an arrow that has to cross two
- * ranks leaves the grid and comes back in, and how far out it goes is measured against
- * the boxes it really passes -- not against the picture.
+ * ranks leaves the boxes and comes back in. Where its vertical leg runs is the one
+ * question this file answers with a grid rather than a rule of thumb; see `columnX`.
  *
  * The order of the boxes within a rank is the model's, until the model's order costs a
  * crossing no route could avoid: two arrows whose ends stand in opposite order have to
@@ -153,14 +153,15 @@ const LANE_STEP = 16;
 const LOOP_OUT = 20;
 const LOOP_HALF = 8;
 /**
- * How far apart two channels stand.
+ * How far apart two lanes stand.
  *
  * An arrow that cannot cross a single gap -- a back edge, or a forward one that skips
- * a rank -- travels outside the boxes, and each gets a channel of its own. Two of them
- * on one line would read as one arrow, which is the same lie as two on one lane.
+ * a rank -- needs a vertical leg of its own, and every one of them wants the gap beside
+ * the box it enters. Two on one line would read as one arrow, which is the same lie as
+ * two on one lane, so they stand a step apart and the gap grows to seat them.
  */
 const MARGIN_STEP = 16;
-/** How far off a box a detour runs while it turns, when no gap seats it. */
+/** How far off a box a detour runs while it turns, when no lane seats it. */
 const TURN_IN = 16;
 
 /** A side of a box an arrow can arrive at or leave from. Horizontals run in gaps. */
@@ -269,12 +270,48 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
   }
   const keys = [...rows.keys()].sort((a, b) => a - b);
   orderRows(rows, keys, scope.edges, rank);
-  const widthOfRow = (row: readonly Draft[]): number =>
-    row.reduce((sum, draft) => sum + draft.width, 0) + gapX * Math.max(0, row.length - 1);
-  const contentWidth = keys.reduce(
-    (widest, key) => Math.max(widest, widthOfRow(rows.get(key) ?? [])),
-    0,
-  );
+  // One grid of columns for the whole picture, shared by every rank. Not tidiness: it is
+  // what makes a lane between two boxes possible at all. A rank centred on its own puts
+  // its boxes wherever its own count leaves them, so the gap between two boxes of one
+  // rank falls on a box of the next -- and a detour that needs a lane through both is
+  // out of luck, which is why every detour used to travel outside all the boxes, also
+  // outside its own destination. A shared column is free between the columns in every
+  // rank at once, because no box ever leaves its column. The price is that a narrow rank
+  // no longer sits in the middle: it hugs the left edge of its widest column.
+  const columnOf = new Map<string, number>();
+  let columnCount = 0;
+  for (const key of keys) {
+    const row = rows.get(key) ?? [];
+    row.forEach((draft, at) => columnOf.set(draft.id, at));
+    columnCount = Math.max(columnCount, row.length);
+  }
+  // A column is as wide as its widest box, so a narrow one leaves room on its right
+  // instead of pushing its neighbours around.
+  const columnWidth: number[] = [];
+  for (const draft of drafts) {
+    const at = columnOf.get(draft.id) ?? 0;
+    columnWidth[at] = Math.max(columnWidth[at] ?? 0, draft.width);
+  }
+  const laneGap: number[] = [];
+  // What a gap needs when no lane uses it: between two columns the boxes beside it have to
+  // stand apart, which is `gapX`; at the two edges of the picture there are no two boxes
+  // and the padding already is the air. Charging `gapX` there too would widen every
+  // picture by two gaps for lanes that may never come.
+  const airAt = (lane: number): number => (lane > 0 && lane < columnCount ? gapX : 0);
+  for (let lane = 0; lane <= columnCount; lane += 1) laneGap.push(airAt(lane));
+  /** Left edge of a column; the gap in front of it included, so the first is past the wall. */
+  const columnX = (at: number): number => {
+    let x = laneGap[0] ?? 0;
+    for (let column = 0; column < at; column += 1) {
+      x += (columnWidth[column] ?? 0) + (laneGap[column + 1] ?? 0);
+    }
+    return x;
+  };
+  const contentExtent = (): number => {
+    const last = columnCount - 1;
+    if (last < 0) return 0;
+    return columnX(last) + (columnWidth[last] ?? 0) + (laneGap[columnCount] ?? 0);
+  };
 
   // Arrows that cross one gap used to run along one horizontal line, with their
   // labels written on top of each other. Each one gets its own lane now, seated by
@@ -305,9 +342,10 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
   const root = scope.root;
   const framed = root !== undefined;
   // Inside a frame the boxes start past the wall, the header and the frame's own
-  // padding; outside one, the canvas padding is all there is. Where they start
-  // sideways is decided further down: the channels are measured against the boxes
-  // first, and only what sticks out past the padding widens the picture.
+  // padding; outside one, the canvas padding is all there is. Sideways too: the lanes
+  // live inside the grid now, so the first gap is already wide enough for them and
+  // nothing has to be shifted right after the fact.
+  const offsetX = framed ? FRAME_INSET + FRAME_PAD : pad;
   const offsetY = framed ? FRAME_INSET + FRAME_PAD + FRAME_HEADER : pad;
   // Rows are stacked with a gap each, and a gap widens when the arrows crossing it
   // need more room than the default one has.
@@ -321,20 +359,65 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
     gaps.set(key, gap);
     top += boxHeight + gap;
   }
+  // Where a detour's lane goes, and why this is not the coin toss it used to be: the
+  // lane belongs in the gap beside the box it enters. The leg that leaves the source is
+  // long wherever the lane stands -- it has to cross the picture either way. The entry
+  // leg is the one that pays for the lane's position, because it crosses every lane
+  // standing between it and its anchor; and n lanes on one side of one anchor cost
+  // n*(n-1)/2 crossings, whatever order they stand in, because for any pair of them one
+  // lane lies between the other and the anchor. Split them over the two gaps and the
+  // same n cost m*(m-1)/2 + k*(k-1)/2, with m + k = n: at six, six instead of fifteen.
+  const laneOf = new Map<number, number>();
+  const laneSeat = new Map<number, number>();
+  const laneUse: number[] = new Array<number>(columnCount + 1).fill(0);
+  const groups = new Map<string, number[]>();
+  for (const { index } of detours) {
+    const edge = scope.edges[index];
+    // Keyed by the side it enters, because two detours into the same box share the
+    // anchors of one side, and only those.
+    push(groups, `${edge.to}:${kinds[index] === 'back' ? 'bottom' : 'top'}`, index);
+  }
+  // Same order the anchors are seated in further down, and for the same reason: what
+  // counts is where the other end stands, not where this one does.
+  const near = (index: number): number => {
+    const from = byId.get(scope.edges[index].from);
+    if (from === undefined) return 0;
+    return columnX(columnOf.get(from.id) ?? 0) + from.width / 2;
+  };
+  for (const members of groups.values()) {
+    members.sort((left, right) => near(left) - near(right));
+    members.forEach((index, at) => {
+      const to = byId.get(scope.edges[index].to);
+      if (to === undefined) return;
+      const column = columnOf.get(to.id) ?? 0;
+      // Left half to the gap on the left, right half to the one on the right. The exact
+      // seat inside the box would need the anchors, and those are seated further down;
+      // but they are seated in this same order, so this is the split of the anchors.
+      const lane = at * 2 < members.length ? column : column + 1;
+      const seat = laneUse[lane] ?? 0;
+      laneUse[lane] = seat + 1;
+      laneOf.set(index, lane);
+      laneSeat.set(index, seat);
+    });
+  }
+  for (let lane = 0; lane < laneGap.length; lane += 1) {
+    // A step of clearance to the box on either side, so a lane never rubs against one.
+    // An unused gap keeps its floor -- and a gap at the edge of the picture has none.
+    const used = laneUse[lane] ?? 0;
+    laneGap[lane] = Math.max(airAt(lane), used === 0 ? 0 : MARGIN_STEP * (used + 1));
+  }
+  // Every box stands on its column now, with the gaps the lanes asked for. Two passes,
+  // because a gap's width decides where the next column starts: the lanes pick their
+  // side first -- which is a question about columns, not about pixels -- and the pixels
+  // follow once.
   for (const key of keys) {
-    const row = rows.get(key) ?? [];
-    // Each rank is centred on its own, so a single box below a wide rank sits in
-    // the middle of the picture rather than at its left edge. Centred in the content,
-    // to be exact: the content is shifted right afterwards, by as much as the channels
-    // outside it need.
-    let x = Math.round((contentWidth - widthOfRow(row)) / 2);
     const y = place.get(key) ?? offsetY;
-    for (const draft of row) {
-      draft.x = x;
+    for (const draft of rows.get(key) ?? []) {
+      draft.x = offsetX + columnX(columnOf.get(draft.id) ?? 0);
       draft.y = y;
-      x += draft.width + gapX;
     }
   }
+  const contentWidth = contentExtent();
 
   // Lanes within one gap run against each other: an arrow that leaves a box runs down
   // from the box and stops on its lane, one that enters the box below starts on its lane
@@ -409,58 +492,15 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
     }
   }
 
-  // How far out a detour has to go: past the leftmost box of every rank its vertical
-  // leg passes, and no further. The edge of the picture used to be the answer, which
-  // made every detour as wide as the widest rank even when it crossed one narrow row.
-  const hull = new Map<number, number>();
-  for (const { index } of detours) {
-    const from = byId.get(scope.edges[index].from);
-    const to = byId.get(scope.edges[index].to);
-    const line = lines.get(index);
-    if (from === undefined || to === undefined || line === undefined) continue;
-    const low = Math.min(line.leave, line.land);
-    const high = Math.max(line.leave, line.land);
-    // An arrow that passes no box at all still needs a line to travel on: the room
-    // between its own two boxes.
-    let left = Math.min(from.x, to.x);
-    for (const key of keys) {
-      const top = place.get(key) ?? offsetY;
-      // A box is in the way when its band straddles the leg. Touching one of the two
-      // lines is not passing through it.
-      if (top + boxHeight <= low || top >= high) continue;
-      for (const draft of rows.get(key) ?? []) left = Math.min(left, draft.x);
-    }
-    hull.set(index, left);
-  }
-
-  // Two detours that pass the same boxes stack outward, one channel each; two that
-  // pass different boxes are measured against their own, so the arrow that steps round
-  // one narrow rank no longer travels as far out as the widest row of the picture.
-  //
-  // One side, and one order: both were tried. With every channel on the left the count
-  // is n*(n-1)/2 for n detours sharing a destination, because whichever order they
-  // stand in, two of them put one channel between the other and its anchor -- every
-  // permutation of the same channels gives the same sum. Moving a channel to the far
-  // side of its own anchor would break that, but only where no box stands, and no
-  // column of this grid is free through every rank a channel has to cross. A guess at
-  // which detour goes which way is not a layout; it is a coin toss that spends width.
-  const channelSeat = new Map<number, number>();
-  const channelFrom = new Map<number, number>();
-  for (const { index } of detours) {
-    const left = hull.get(index);
-    if (left === undefined) continue;
-    const at = channelSeat.get(left) ?? 0;
-    channelSeat.set(left, at + 1);
-    channelFrom.set(index, left - MARGIN_STEP * (at + 1));
-  }
-  // Nothing ends up left of the padding, so the picture still starts there and the
-  // boxes move right by what the outermost channel needs. Channels and boxes move
-  // together, so no arrow changes shape.
-  const shift = -detours.reduce((out, { index }) => Math.min(out, channelFrom.get(index) ?? 0), 0);
-  const offsetX = (framed ? FRAME_INSET + FRAME_PAD : pad) + shift;
-  for (const draft of drafts) draft.x += offsetX;
-  /** The channel a detour travels in; the nearest one is a step off the boxes it passes. */
-  const channelX = (index: number): number => offsetX + (channelFrom.get(index) ?? 0);
+  /** The lane a detour travels in: in the gap beside the box it enters, a step off it. */
+  const channelX = (index: number): number => {
+    const lane = laneOf.get(index);
+    if (lane === undefined) return offsetX;
+    const seat = laneSeat.get(index) ?? 0;
+    // Counted from the left edge of the gap, so the lanes of one gap stand in the order
+    // they were seated and the last one keeps a step of clearance to the box beside it.
+    return offsetX + columnX(lane) - (laneGap[lane] ?? gapX) + MARGIN_STEP * (seat + 1);
+  };
 
   const lastRow = keys.at(-1);
   const contentHeight =
@@ -560,8 +600,8 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
   /**
    * An arrow that skips a rank. Its vertical cannot run down at the x it lands on:
    * that is where the boxes of the ranks in between are. So it dives into the gap
-   * below its box, crosses out to its own channel beside the boxes, comes down there --
-   * past every rank it skips -- and turns in through the gap above the box it enters.
+   * below its box, crosses to its lane beside the box it enters, comes down there --
+   * past every rank it skips -- and turns in through the gap above that box.
    */
   const around = (from: Draft, to: Draft, leave: number, land: number, index: number): Point[] => {
     const line = lines.get(index);
@@ -581,8 +621,9 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
   /**
    * An arrow to a higher rank. It cannot leave its box sideways: that horizontal would
    * lie inside its own rank and pass through every box standing beside it. So it goes
-   * out of the top, crosses to its channel above its own rank, climbs, and comes back
-   * into the bottom of the box it points at -- which is the direction it points.
+   * out of the top, crosses sideways inside the gap above its own rank to the lane
+   * beside the box it points at, climbs, and comes back into the bottom of that box --
+   * which is the direction it points.
    */
   const back = (
     from: Draft,

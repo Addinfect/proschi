@@ -112,16 +112,20 @@ describe('a layout of one level', () => {
       'a 24,24',
       'b 24,136',
       'c 184,136',
-      'd 104,248',
+      'd 24,248',
       'e 184,24',
     ]);
     expect([layout.width, layout.height]).toEqual([336, 320]);
   });
 
-  it('centres a rank on its own, so one box below two sits in the middle', () => {
+  it('keeps a narrow rank on the columns of the wide ones instead of centring it', () => {
+    // `d` is alone below two boxes. Centred on its own it stood under the gap between
+    // them -- and the gap beside it moved with it, so there was no room a lane could rely
+    // on. On the first column the gap to the second one is free at every rank.
     const layout = lay();
     const d = boxOf(layout, 'd');
-    expect(d.x + d.width / 2).toBe(layout.width / 2);
+    expect(d.x).toBe(boxOf(layout, 'a').x);
+    expect(d.x + d.width).toBeLessThanOrEqual(boxOf(layout, 'c').x);
   });
 
   it('never lets two boxes in one rank overlap', () => {
@@ -211,12 +215,17 @@ describe('a layout of one level', () => {
     const lanes = ['left', 'middle', 'right'].map((to) => {
       const edge = edgeOf(layout, 'hub', to);
       // Its own height, and inside the gap: below the box it leaves, above the rank
-      // it lands on. Read off the label, not the path -- an arrow whose two ends line
-      // up is drawn as one straight leg, and its lane is then a point the polyline no
-      // longer carries.
-      expect(edge.label.y).toBeGreaterThan(hub.y + hub.height);
-      expect(edge.label.y).toBeLessThan(boxOf(layout, to).y);
-      return edge.label.y;
+      // it lands on. Read off the horizontal leg, not the label: a label goes on the
+      // longest leg, and the arrow to the leftmost box is closer to straight down than
+      // across -- its longest leg is the one into the box, so its label sits low and
+      // says nothing about the lane.
+      const legs = edge.path.slice(1).map((point, at) => ({ from: edge.path[at], to: point }));
+      const across = legs.find((leg) => leg.from.x !== leg.to.x);
+      if (across === undefined) throw new Error(`the arrow to ${to} runs straight down`);
+      const y = across.to.y;
+      expect(y).toBeGreaterThan(hub.y + hub.height);
+      expect(y).toBeLessThan(boxOf(layout, to).y);
+      return y;
     });
     expect(new Set(lanes).size).toBe(3);
     // In the order they land, left to right, so the fan does not cross itself.
@@ -244,7 +253,9 @@ describe('a layout of one level', () => {
     // Half way between the ranks and between the two anchors: the leg across the
     // gap is the long one, so the count sits on it.
     expect(edgeOf(layout, 'a', 'c').label).toEqual({ x: 179, y: 115 });
-    expect(edgeOf(layout, 'b', 'd').label).toEqual({ x: 118, y: 205 });
+    // `b -> d` runs within one column now, so its horizontal is the short leg and the
+    // count goes on the vertical below `d`.
+    expect(edgeOf(layout, 'b', 'd').label).toEqual({ x: 67, y: 227 });
   });
 
   it('keeps what a collapsed edge stood for', () => {
@@ -474,10 +485,9 @@ describe('a layout of an arrow that cannot cross one gap', () => {
   });
 
   it('measures a channel against the boxes it passes, not against the picture', () => {
-    // Two cycles side by side. Each closing edge climbs over one gap and passes no box
-    // at all, so each turns beside its own column: the left one outside the picture,
-    // the right one between the two columns. One margin for the whole level would have
-    // sent both of them out past the left edge.
+    // Two cycles side by side. Each closing edge turns in the gap beside the box it
+    // enters: the left one outside the picture, the right one between the two columns.
+    // One margin for the whole level would have sent both of them out past the left edge.
     const graph: Graph = {
       nodes: [
         { id: 'a', type: 'module' },
@@ -512,10 +522,9 @@ describe('a layout of an arrow that cannot cross one gap', () => {
     expect(right).toBeLessThan(boxOf(layout, 'c').x);
   });
 
-  it('seats the shortest detour nearest the boxes', () => {
-    // One arrow steps round a single rank, one goes back over three: the short turn
-    // is the inner channel, so a set of detours reads as nested turns and not as a
-    // tangle of lines that happen to be outside.
+  it('stands every detour beside the box it enters, a step apart', () => {
+    // The two detours land at the same box, so both lanes belong in the gap beside it --
+    // not at the edge of the picture, where a lane costs more than it saves.
     const graph: Graph = {
       nodes: [
         { id: 'a', type: 'module' },
@@ -536,10 +545,52 @@ describe('a layout of an arrow that cannot cross one gap', () => {
     const over = edgeOf(layout, 'd', 'a');
     expect(round.kind).toBe('around');
     expect(over.kind).toBe('back');
-    const inner = Math.min(...round.path.map((point) => point.x));
-    const outer = Math.min(...over.path.map((point) => point.x));
-    expect(outer).toBeLessThan(inner);
-    expect(inner).toBeLessThan(boxOf(layout, 'a').x);
+    const a = boxOf(layout, 'a');
+    // The third point of a detour is the lane it comes down in.
+    const lanes = [round, over].map((edge) => edge.path[2]?.x ?? 0);
+    for (const lane of lanes) {
+      expect(lane).toBeLessThan(a.x);
+      expect(a.x - lane).toBeLessThanOrEqual(32);
+    }
+    // A step apart, or two vertical legs read as one.
+    const [first = 0, second = 0] = lanes;
+    expect(Math.abs(first - second)).toBe(16);
+  });
+
+  it('splits the detours of one anchor over both gaps, where they cost less', () => {
+    // Four arrows into one box, every one of them entering at the bottom. All on one side
+    // of the anchor they cost n*(n-1)/2 crossings, whatever order they take: for any two
+    // of them one lane lies between the other and the anchor. Over both gaps the same
+    // four cost m*(m-1)/2 + k*(k-1)/2, which at two and two is one and one.
+    const graph: Graph = {
+      nodes: [
+        { id: 'q1', type: 'module' },
+        { id: 'q2', type: 'module' },
+        { id: 'q3', type: 'module' },
+        { id: 'q4', type: 'module' },
+        { id: 'mid', type: 'module' },
+        { id: 'sink', type: 'module' },
+      ],
+      edges: [
+        { id: 'mid-needs-sink', relation: 'depends-on', source: 'mid', target: 'sink' },
+        { id: 'q1-needs-mid', relation: 'depends-on', source: 'q1', target: 'mid' },
+        { id: 'q1-needs-sink', relation: 'depends-on', source: 'q1', target: 'sink' },
+        { id: 'q2-needs-sink', relation: 'depends-on', source: 'q2', target: 'sink' },
+        { id: 'q3-needs-sink', relation: 'depends-on', source: 'q3', target: 'sink' },
+        { id: 'q4-needs-sink', relation: 'depends-on', source: 'q4', target: 'sink' },
+      ],
+    };
+    const layout = lay(graph);
+    const sink = boxOf(layout, 'sink');
+    const lanes = ['q1', 'q2', 'q3', 'q4'].map((id) => edgeOf(layout, id, 'sink').path[2]?.x ?? 0);
+    expect(lanes.filter((x) => x < sink.x).length).toBe(2);
+    expect(lanes.filter((x) => x > sink.x + sink.width).length).toBe(2);
+    // Each of them a step off the box, and no further than the seats need.
+    for (const lane of lanes) {
+      const off = lane < sink.x ? sink.x - lane : lane - (sink.x + sink.width);
+      expect(off).toBeGreaterThanOrEqual(16);
+      expect(off).toBeLessThanOrEqual(32);
+    }
   });
 });
 

@@ -201,8 +201,38 @@ const EDGES: readonly Edge[] = [
 
 export const SHOP: Graph = { nodes: NODES, edges: EDGES };
 
-/** The text on a box: the node's name, else its id. */
-export function labelOf(id: Id): string {
-  const node = SHOP.nodes.find((candidate) => candidate.id === id);
-  return node?.name ?? id;
+/**
+ * One fan, and nothing else: a box that calls five, wired in the order that makes a mess.
+ *
+ * The five targets stand in the order they are declared -- nothing here needs sorting --
+ * but the edges leave `gateway` in the reverse of that. A router that anchors an arrow
+ * where the source lists it starts the arrow to the rightmost box on the leftmost pixel,
+ * so each of those arrows has to cross the others on its way out; anchored where it lands,
+ * the same fan opens. Too small to be a model, exactly big enough to count by eye.
+ */
+export const FAN: Graph = {
+  nodes: [
+    part('gateway', 'gateway', 'application'),
+    part('alpha', 'alpha', 'domain'),
+    part('beta', 'beta', 'domain'),
+    part('gamma', 'gamma', 'domain'),
+    part('delta', 'delta', 'domain'),
+    part('epsilon', 'epsilon', 'domain'),
+  ],
+  edges: [
+    uses('gateway', 'epsilon'),
+    uses('gateway', 'delta'),
+    uses('gateway', 'gamma'),
+    uses('gateway', 'beta'),
+    uses('gateway', 'alpha'),
+  ],
+};
+
+/** The text on a box, read off one model: the node's name, else its id. */
+export function labels(graph: Graph): (id: Id) => string {
+  const byId = new Map(graph.nodes.map((node) => [node.id, node] as const));
+  return (id) => byId.get(id)?.name ?? id;
 }
+
+/** The text on a box of the shop. */
+export const labelOf = labels(SHOP);
