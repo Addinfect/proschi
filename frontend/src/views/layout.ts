@@ -18,6 +18,11 @@ import type { ScopeEdge, ScopeView } from './scope';
  * edge, and the picture still terminates -- a cycle is the checker's finding, not
  * a reason to draw nothing.
  *
+ * The space between two ranks is where the arrows live, so an arrow that would have
+ * to cross two of them goes around the left margin instead of across the boxes in
+ * between. Both detours exist for the same reason: a line drawn through a box is a
+ * claim about that box, and the layout may not make one.
+ *
  * Nothing here invents content. There is no node without a box, no box without a
  * node, and the order within a rank is the order the model declares.
  */
@@ -53,13 +58,15 @@ export interface LayoutFrame {
 /**
  * How an arrow got where it is:
  *
- * - `forward` — to a lower rank, the ordinary case;
+ * - `forward` — one rank down, the ordinary case;
+ * - `around` — further down than one rank, so it leaves the grid and travels in
+ *   the left margin rather than straight down through the ranks in between;
  * - `back` — to the same or a higher rank, so it goes around the left side;
  * - `self` — both ends on one box, a loop on its right edge;
  * - `cross` — an end lies outside the scope, so it runs through the frame's wall
  *   and stops outside it.
  */
-export type EdgeKind = 'forward' | 'back' | 'self' | 'cross';
+export type EdgeKind = 'forward' | 'around' | 'back' | 'self' | 'cross';
 
 /** An edge from a scope, routed. `path` is a polyline; the last point is where it ends. */
 export interface LayoutEdge {
@@ -135,10 +142,19 @@ const CROSS_IN = 8;
  * can seat.
  */
 const LANE_STEP = 16;
-/** How far a self loop and a back edge reach outside their box. */
+/** How far a self loop reaches outside its box. */
 const LOOP_OUT = 20;
 const LOOP_HALF = 8;
-const BACK_OUT = 16;
+/**
+ * How far apart the channels in the left margin stand.
+ *
+ * An arrow that cannot cross a single gap -- a back edge, or a forward one that skips
+ * a rank -- travels in the margin, and each gets a channel of its own. Two of them
+ * on one line would read as one arrow, which is the same lie as two on one lane.
+ */
+const MARGIN_STEP = 16;
+/** How far above the box it enters an `around` edge turns in, when no gap seats it. */
+const TURN_IN = 16;
 
 /** A side of a box an arrow can arrive at or leave from. */
 type Side = 'top' | 'bottom' | 'left';
@@ -205,8 +221,27 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
     const to = byId.get(edge.to);
     if (from === undefined || to === undefined) return 'cross';
     if (from === to) return 'self';
-    return (rank.get(to.id) ?? 0) > (rank.get(from.id) ?? 0) ? 'forward' : 'back';
+    const climb = (rank.get(to.id) ?? 0) - (rank.get(from.id) ?? 0);
+    if (climb === 1) return 'forward';
+    // Down two ranks or more is not one elbow: the vertical would run through every
+    // box in the ranks it skips, and a line through a box is a claim about it.
+    if (climb > 1) return 'around';
+    return 'back';
   });
+
+  // The margin, one channel per arrow that leaves the grid. Seated shortest span
+  // innermost, so the arrow that steps round one rank stays nearest the boxes and the
+  // ones that travel further sit further out. That is a reading aid, not a promise:
+  // two detours whose rank ranges overlap can still cross each other.
+  const channels = scope.edges
+    .map((edge, index) => ({
+      index,
+      span: Math.abs((rank.get(edge.to) ?? 0) - (rank.get(edge.from) ?? 0)),
+    }))
+    .filter(({ index }) => kinds[index] === 'back' || kinds[index] === 'around')
+    .sort((left, right) => left.span - right.span || left.index - right.index)
+    .map(({ index }) => index);
+  const channelOf = new Map<number, number>(channels.map((index, seat) => [index, seat]));
 
   // One row per rank, in model order, because that is the only order anyone
   // reading the source will recognise.
@@ -228,10 +263,22 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
   // Arrows that cross one gap used to run along one horizontal line, with their
   // labels written on top of each other. Each one gets its own lane now, seated by
   // where it lands, so a fan reads as a fan and every count has room.
+  // An `around` arrow runs through two gaps -- the one below the box it leaves and
+  // the one above the box it enters -- so it is seated in both.
   const laneOrder = new Map<number, number[]>();
+  const seat = (key: number, index: number): void => {
+    if (rows.has(key)) push(laneOrder, key, index);
+  };
   scope.edges.forEach((edge, index) => {
-    if (kinds[index] !== 'forward') return;
-    push(laneOrder, rank.get(edge.from) ?? 0, index);
+    const kind = kinds[index];
+    const from = rank.get(edge.from);
+    const to = rank.get(edge.to);
+    if (from === undefined || to === undefined) return;
+    if (kind === 'forward') seat(from, index);
+    else if (kind === 'around') {
+      seat(from, index);
+      seat(to - 1, index);
+    }
   });
   const modelIndex = new Map<Id, number>(drafts.map((draft, index) => [draft.id, index]));
   for (const seats of laneOrder.values()) {
@@ -244,8 +291,14 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
   const root = scope.root;
   const framed = root !== undefined;
   // Inside a frame the boxes start past the wall, the header and the frame's own
-  // padding; outside one, the canvas padding is all there is.
-  const offsetX = framed ? FRAME_INSET + FRAME_PAD : pad;
+  // padding; outside one, the canvas padding is all there is. Either way the margin
+  // comes first: it is where the arrows that leave the grid travel, and it sits
+  // between the boxes and whatever bounds the picture.
+  const margin = channels.length * MARGIN_STEP;
+  const offsetX = (framed ? FRAME_INSET + FRAME_PAD : pad) + margin;
+  /** The channel a margin arrow travels in; the nearest is one step off the boxes. */
+  const channelX = (index: number): number =>
+    offsetX - MARGIN_STEP * ((channelOf.get(index) ?? 0) + 1);
   const offsetY = framed ? FRAME_INSET + FRAME_PAD + FRAME_HEADER : pad;
   // Rows are stacked with a gap each, and a gap widens when the arrows crossing it
   // need more room than the default one has.
@@ -273,12 +326,19 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
   }
 
   // A lane sits between the two ranks, one per arrow, half a lane clear of either.
-  const lanes = new Map<number, number>();
+  // An `around` arrow has one at each end of its detour: the gap it dives into, and
+  // the gap it comes back through.
+  const laneOut = new Map<number, number>();
+  const laneIn = new Map<number, number>();
   for (const [key, seats] of laneOrder) {
     const bottom = (place.get(key) ?? offsetY) + boxHeight;
     const gap = gaps.get(key) ?? gapY;
     seats.forEach((index, seat) => {
-      lanes.set(index, Math.round(bottom + (gap * (seat + 1)) / (seats.length + 1)));
+      const y = Math.round(bottom + (gap * (seat + 1)) / (seats.length + 1));
+      // Its own gap is the one under the box it leaves; the other one is where it
+      // turns back in.
+      if (key === rank.get(scope.edges[index].from)) laneOut.set(index, y);
+      else laneIn.set(index, y);
     });
   }
 
@@ -316,7 +376,7 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
   };
   scope.edges.forEach((edge, index) => {
     const kind = kinds[index];
-    if (kind === 'forward') {
+    if (kind === 'forward' || kind === 'around') {
       addSlot(index, 'from', 'bottom');
       addSlot(index, 'to', 'top');
     } else if (kind === 'back') {
@@ -363,10 +423,30 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
     return simplify([a, { x: a.x, y: midY }, { x: b.x, y: midY }, b]);
   };
 
-  const back = (from: Draft, to: Draft, leave: number, land: number): Point[] => {
+  /**
+   * An arrow that skips a rank. Its vertical cannot run down at the x it lands on:
+   * that is where the boxes of the ranks in between are. So it dives into the gap
+   * below its box, crosses to its own channel in the margin, comes down there -- past
+   * every rank it skips -- and turns in through the gap above the box it enters.
+   */
+  const around = (from: Draft, to: Draft, leave: number, land: number, index: number): Point[] => {
+    const down = laneOut.get(index) ?? Math.round(from.y + from.height + gapY / 2);
+    const turn = laneIn.get(index) ?? Math.round(to.y - TURN_IN);
+    const out = channelX(index);
+    return simplify([
+      { x: leave, y: from.y + from.height },
+      { x: leave, y: down },
+      { x: out, y: down },
+      { x: out, y: turn },
+      { x: land, y: turn },
+      { x: land, y: to.y },
+    ]);
+  };
+
+  const back = (from: Draft, to: Draft, leave: number, land: number, index: number): Point[] => {
     const a = { x: from.x, y: leave };
     const b = { x: to.x, y: land };
-    const out = Math.max(2, Math.round(Math.min(from.x, to.x) - BACK_OUT));
+    const out = channelX(index);
     return simplify([a, { x: out, y: a.y }, { x: out, y: b.y }, b]);
   };
 
@@ -436,9 +516,11 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
       const land = ends[index].to?.at;
       if (from === to) path = loop(from);
       else if (kind === 'forward') {
-        path = forward(from, to, leave ?? centerX(from), land ?? centerX(to), lanes.get(index));
+        path = forward(from, to, leave ?? centerX(from), land ?? centerX(to), laneOut.get(index));
+      } else if (kind === 'around') {
+        path = around(from, to, leave ?? centerX(from), land ?? centerX(to), index);
       } else {
-        path = back(from, to, leave ?? centerY(from), land ?? centerY(to));
+        path = back(from, to, leave ?? centerY(from), land ?? centerY(to), index);
       }
     }
     return {

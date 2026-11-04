@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Graph } from '../engine';
 import { readScope, type ScopeView } from './scope';
-import { layoutScope, type LayoutBox, type LayoutEdge, type ScopeLayout } from './layout';
+import { layoutScope, type LayoutBox, type LayoutEdge, type Point, type ScopeLayout } from './layout';
 
 /**
  * Where the boxes go.
@@ -67,6 +67,33 @@ function endsOf(edge: LayoutEdge) {
 /** Top left corner of every box, in the order the model declares them. */
 function cornersOf(layout: ScopeLayout): string[] {
   return layout.boxes.map((box) => `${box.id} ${box.x},${box.y}`);
+}
+
+/** The straight legs of a route, one for each pair of consecutive points. */
+function legsOf(edge: LayoutEdge): { a: Point; b: Point }[] {
+  const legs: { a: Point; b: Point }[] = [];
+  for (let i = 1; i < edge.path.length; i += 1) {
+    const a = edge.path[i - 1];
+    const b = edge.path[i];
+    if (a !== undefined && b !== undefined) legs.push({ a, b });
+  }
+  return legs;
+}
+
+/**
+ * Whether a leg runs through the inside of a box. A leg along an edge does not
+ * count -- an arrow lands on a top edge, it does not cross it -- so the comparison
+ * is against the open rectangle.
+ */
+function crossesBox(leg: { a: Point; b: Point }, box: LayoutBox): boolean {
+  const between = (value: number, low: number, high: number): boolean => low < value && value < high;
+  const [top, bottom] = leg.a.y <= leg.b.y ? [leg.a.y, leg.b.y] : [leg.b.y, leg.a.y];
+  const [left, right] = leg.a.x <= leg.b.x ? [leg.a.x, leg.b.x] : [leg.b.x, leg.a.x];
+  const down =
+    between(leg.a.x, box.x, box.x + box.width) && top < box.y + box.height && bottom > box.y;
+  const across =
+    between(leg.a.y, box.y, box.y + box.height) && left < box.x + box.width && right > box.x;
+  return leg.a.x === leg.b.x ? down : across;
 }
 
 describe('a layout of one level', () => {
@@ -370,3 +397,100 @@ describe('a layout of an awkward level', () => {
     expect(layout.issues.map((issue) => issue.code)).toEqual(['unknown-root']);
   });
 });
+
+describe('a layout of an arrow that cannot cross one gap', () => {
+  /** `a` at the top, `b` between, `c` at the bottom, and an arrow from `a` straight to `c`. */
+  const skipping: Graph = {
+    nodes: [
+      { id: 'a', type: 'module' },
+      { id: 'b', type: 'module' },
+      { id: 'c', type: 'module' },
+    ],
+    edges: [
+      { id: 'a-needs-b', relation: 'depends-on', source: 'a', target: 'b' },
+      { id: 'b-needs-c', relation: 'depends-on', source: 'b', target: 'c' },
+      { id: 'a-needs-c', relation: 'depends-on', source: 'a', target: 'c' },
+    ],
+  };
+
+  it('never draws an arrow through the box it skips', () => {
+    // Two ranks between the ends: straight down would run through `b`, and a line
+    // through a box is a claim about that box.
+    const layout = lay(skipping);
+    const over = edgeOf(layout, 'a', 'c');
+    expect(over.kind).toBe('around');
+    expect(over.head).toBe(true);
+    for (const leg of legsOf(over)) {
+      for (const box of layout.boxes) {
+        expect(crossesBox(leg, box)).toBe(false);
+      }
+    }
+    // Out of the bottom of its box and onto the top of the other, like any arrow
+    // that lands; only the way it gets there is different.
+    const { start, end } = endsOf(over);
+    const a = boxOf(layout, 'a');
+    const c = boxOf(layout, 'c');
+    expect(start.y).toBe(a.y + a.height);
+    expect(end.y).toBe(c.y);
+    // And it travels outside the columns it skips, not between two boxes in a rank.
+    expect(Math.min(...over.path.map((point) => point.x))).toBeLessThan(a.x);
+  });
+
+  it('gives every arrow that leaves the grid a channel of its own', () => {
+    // Two arrows leave the grid over one rank each, and there is nothing to share:
+    // two detours on one vertical would read as a single arrow.
+    const graph: Graph = {
+      nodes: [
+        { id: 'a', type: 'module' },
+        { id: 'b', type: 'module' },
+        { id: 'c', type: 'module' },
+      ],
+      edges: [
+        { id: 'a-needs-b', relation: 'depends-on', source: 'a', target: 'b' },
+        { id: 'b-needs-c', relation: 'depends-on', source: 'b', target: 'c' },
+        { id: 'b-needs-a', relation: 'depends-on', source: 'b', target: 'a' },
+        { id: 'c-needs-b', relation: 'depends-on', source: 'c', target: 'b' },
+      ],
+    };
+    const layout = lay(graph);
+    const channels = [edgeOf(layout, 'b', 'a'), edgeOf(layout, 'c', 'b')].map((edge) => {
+      expect(edge.kind).toBe('back');
+      const channel = Math.min(...edge.path.map((point) => point.x));
+      // Clear of every box in the picture, not merely of its own two.
+      for (const box of layout.boxes) expect(channel).toBeLessThan(box.x);
+      return channel;
+    });
+    expect(channels[0]).not.toBe(channels[1]);
+  });
+
+  it('seats the shortest detour nearest the boxes', () => {
+    // One arrow steps round a single rank, one goes back over three: the short turn
+    // is the inner channel, so a set of detours reads as nested turns and not as a
+    // tangle of lines that happen to be outside.
+    const graph: Graph = {
+      nodes: [
+        { id: 'a', type: 'module' },
+        { id: 'b', type: 'module' },
+        { id: 'c', type: 'module' },
+        { id: 'd', type: 'module' },
+      ],
+      edges: [
+        { id: 'a-needs-b', relation: 'depends-on', source: 'a', target: 'b' },
+        { id: 'b-needs-c', relation: 'depends-on', source: 'b', target: 'c' },
+        { id: 'c-needs-d', relation: 'depends-on', source: 'c', target: 'd' },
+        { id: 'd-needs-a', relation: 'depends-on', source: 'd', target: 'a' },
+        { id: 'a-needs-c', relation: 'depends-on', source: 'a', target: 'c' },
+      ],
+    };
+    const layout = lay(graph);
+    const round = edgeOf(layout, 'a', 'c');
+    const over = edgeOf(layout, 'd', 'a');
+    expect(round.kind).toBe('around');
+    expect(over.kind).toBe('back');
+    const inner = Math.min(...round.path.map((point) => point.x));
+    const outer = Math.min(...over.path.map((point) => point.x));
+    expect(outer).toBeLessThan(inner);
+    expect(inner).toBeLessThan(boxOf(layout, 'a').x);
+  });
+});
+

@@ -66,11 +66,12 @@ from the longest path along the drawn edges, in model order within a rank. No EL
 no worker, no DOM — the whole file is arithmetic, so the picture can be checked
 without a browser, and painting it is a `<svg>` that loops over the result.
 
-Four routes, and `kind` says which one an arrow got:
+Five routes, and `kind` says which one an arrow got:
 
 | `kind` | When | Drawn as |
 | --- | --- | --- |
-| `forward` | to a lower rank | out of the bottom, into the top, one elbow |
+| `forward` | one rank down | out of the bottom, into the top, one elbow |
+| `around` | further down than one rank | around the left margin, past the ranks it skips |
 | `back` | to the same or a higher rank | around the left of both boxes |
 | `self` | both ends on one box | a loop on its right edge |
 | `cross` | an end is outside the scope | through the wall of the opened node, and out |
@@ -96,6 +97,12 @@ Neither do they share a lane. Arrows crossing the same gap each get a horizontal
 of their own, seated in the order they land so the fan does not fold over itself, and
 the gap grows when more arrows need it than the default one can seat. One line for
 three relations put three counts on one pixel.
+
+Nor do they **share a channel**. An arrow that cannot cross a single gap — a `back`
+edge, or an `around` one that skips a rank — leaves the grid and travels in the left
+margin: one channel per arrow, the shortest detour nearest the boxes, and the margin
+widens with their number the way a gap does. Two detours on one vertical would read as
+one arrow.
 
 ## `ink.ts`
 
