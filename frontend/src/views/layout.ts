@@ -22,7 +22,9 @@ import type { ScopeEdge, ScopeView } from './scope';
  * in one. A leg along a rank would pass through the boxes standing in it, and a line
  * drawn through a box is a claim about that box. So an arrow that has to cross two
  * ranks leaves the grid and comes back in, and how far out it goes is measured against
- * the boxes it really passes -- not against the picture.
+ * the boxes it really passes -- not against the picture. Which side it steps round on
+ * is the destination's call: the side the channel does not have to be crossed back
+ * over from.
  *
  * The order of the boxes within a rank is the model's, until the model's order costs a
  * crossing no route could avoid: two arrows whose ends stand in opposite order have to
@@ -157,7 +159,8 @@ const LOOP_HALF = 8;
  *
  * An arrow that cannot cross a single gap -- a back edge, or a forward one that skips
  * a rank -- travels outside the boxes, and each gets a channel of its own. Two of them
- * on one line would read as one arrow, which is the same lie as two on one lane.
+ * on one line would read as one arrow, which is the same lie as two on one lane. Channels
+ * are counted per side of the row, so the two sides never queue behind each other.
  */
 const MARGIN_STEP = 16;
 /** How far off a box a detour runs while it turns, when no gap seats it. */
@@ -409,10 +412,11 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
     }
   }
 
-  // How far out a detour has to go: past the leftmost box of every rank its vertical
-  // leg passes, and no further. The edge of the picture used to be the answer, which
-  // made every detour as wide as the widest rank even when it crossed one narrow row.
-  const hull = new Map<number, number>();
+  // How far out a detour has to go: past the boxes of every rank its vertical leg
+  // passes, and no further. The edge of the picture used to be the answer, which made
+  // every detour as wide as the widest rank even when it crossed one narrow row. Two
+  // numbers instead of one, because a detour can step round on either side.
+  const bounds = new Map<number, { left: number; right: number }>();
   for (const { index } of detours) {
     const from = byId.get(scope.edges[index].from);
     const to = byId.get(scope.edges[index].to);
@@ -423,34 +427,68 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
     // An arrow that passes no box at all still needs a line to travel on: the room
     // between its own two boxes.
     let left = Math.min(from.x, to.x);
+    let right = Math.max(from.x + from.width, to.x + to.width);
     for (const key of keys) {
       const top = place.get(key) ?? offsetY;
       // A box is in the way when its band straddles the leg. Touching one of the two
       // lines is not passing through it.
       if (top + boxHeight <= low || top >= high) continue;
-      for (const draft of rows.get(key) ?? []) left = Math.min(left, draft.x);
+      for (const draft of rows.get(key) ?? []) {
+        left = Math.min(left, draft.x);
+        right = Math.max(right, draft.x + draft.width);
+      }
     }
-    hull.set(index, left);
+    bounds.set(index, { left, right });
+  }
+
+  // Which side of the boxes a detour steps round on, and the whole reason there are
+  // two: a channel left of every box is also left of the destination, so it stands
+  // between the entry leg and its own anchor -- and the entry leg then crosses every
+  // other detour's channel on the way in. Stepping round on the destination's side
+  // puts the channel beyond the anchor instead, where no other channel stands. The
+  // destination decides, not the source, because it is the entry leg that pays.
+  //
+  // Ranks are all centred on one axis, so an x compares across them. A destination
+  // that is not further right than its source keeps the left side: those are the
+  // detours that climb back up, and sending one of them round the right would only
+  // move its crossings from the entry leg to the exit leg.
+  const channelSide = new Map<number, 'left' | 'right'>();
+  for (const { index } of detours) {
+    const from = byId.get(scope.edges[index].from);
+    const to = byId.get(scope.edges[index].to);
+    if (from === undefined || to === undefined) continue;
+    channelSide.set(index, centerX(to) > centerX(from) ? 'right' : 'left');
   }
 
   // Two detours that pass the same boxes stack outward, one channel each; two that
   // pass different boxes are measured against their own, so the arrow that steps round
   // one narrow rank no longer travels as far out as the widest row of the picture.
-  const channelSeat = new Map<number, number>();
+  // Seats are counted per side: a channel on the right must not push one on the left
+  // further left, or the two sides would cost each other room for nothing.
+  const channelSeat = new Map<string, number>();
   const channelFrom = new Map<number, number>();
   for (const { index } of detours) {
-    const left = hull.get(index);
-    if (left === undefined) continue;
-    const at = channelSeat.get(left) ?? 0;
-    channelSeat.set(left, at + 1);
-    channelFrom.set(index, left - MARGIN_STEP * (at + 1));
+    const bound = bounds.get(index);
+    const side = channelSide.get(index);
+    if (bound === undefined || side === undefined) continue;
+    const edge = side === 'left' ? bound.left : bound.right;
+    const seatKey = `${side}:${edge}`;
+    const at = channelSeat.get(seatKey) ?? 0;
+    channelSeat.set(seatKey, at + 1);
+    const step = MARGIN_STEP * (at + 1);
+    channelFrom.set(index, side === 'left' ? edge - step : edge + step);
   }
   // Nothing ends up left of the padding, so the picture still starts there and the
   // boxes move right by what the outermost channel needs. Channels and boxes move
-  // together, so no arrow changes shape.
+  // together, so no arrow changes shape. A channel on the right needs no shift, only
+  // canvas: what it reaches past the widest rank is added to the width below.
   const shift = -detours.reduce((out, { index }) => Math.min(out, channelFrom.get(index) ?? 0), 0);
   const offsetX = (framed ? FRAME_INSET + FRAME_PAD : pad) + shift;
   for (const draft of drafts) draft.x += offsetX;
+  const reach = detours.reduce((out, { index }) => {
+    const at = channelFrom.get(index);
+    return at === undefined || at <= contentWidth ? out : Math.max(out, at - contentWidth);
+  }, 0);
   /** The channel a detour travels in; the nearest one is a step off the boxes it passes. */
   const channelX = (index: number): number => offsetX + (channelFrom.get(index) ?? 0);
 
@@ -460,7 +498,7 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
   // Past the last box: the frame's own padding, then the wall, then the room a
   // crossing needs to be visible outside it.
   const beyond = framed ? FRAME_PAD + FRAME_INSET : pad;
-  const width = Math.ceil(offsetX + contentWidth + beyond);
+  const width = Math.ceil(offsetX + contentWidth + reach + beyond);
   const height = Math.ceil(offsetY + contentHeight + beyond);
 
   const frame: LayoutFrame | undefined =
