@@ -1,4 +1,4 @@
-import type { LayoutBox, Point, ScopeLayout } from './layout';
+import type { EdgeKind, LayoutBox, Point, ScopeLayout } from './layout';
 
 /**
  * How bad a drawing is, as numbers.
@@ -31,6 +31,12 @@ import type { LayoutBox, Point, ScopeLayout } from './layout';
  * Two thresholds are assumptions about eyes, not truths: `TOGETHER` and `LABEL_REACH`.
  * They are constants so that changing one assumption moves every number at once, and so
  * that a test can say which assumption it is testing.
+ *
+ * The total is a verdict; `costSplit` says who is to blame for it. A picture whose cost
+ * sits in the arrows that leave the grid is a routing problem, one whose cost sits in
+ * the arrows that run through it is a placement problem, and those are two different
+ * changes -- knowing which one is which is the difference between improving the picture
+ * and rewriting the wrong half of it.
  *
  * Nothing here is a promise about the model. A clean drawing of a confused model is
  * still a confused model; these numbers only say whether the drawing got in the way.
@@ -80,6 +86,49 @@ export function measure(layout: ScopeLayout): LayoutMetrics {
   };
 }
 
+/**
+ * The same cost, split by what is doing it: the arrows that have to leave the grid --
+ * `around` and `back` -- and the ones that run through it.
+ */
+export interface CostSplit {
+  /** Corners, and which arrows make them. */
+  readonly bends: { readonly detour: number; readonly grid: number };
+  /** Crossings: two detours meeting, a detour meeting the grid, or two grid arrows. */
+  readonly crossings: { readonly detour: number; readonly mixed: number; readonly grid: number };
+}
+
+/** Where the drawing's cost sits, split by the arrows that make it. */
+export function costSplit(layout: ScopeLayout): CostSplit {
+  const { legs } = legsOf(layout);
+  const crossings = { detour: 0, mixed: 0, grid: 0 };
+  eachPair(legs, (first, second) => {
+    if (!crossing(first, second)) return;
+    const left = leavesGrid(layout, first);
+    const right = leavesGrid(layout, second);
+    if (left && right) crossings.detour += 1;
+    else if (left || right) crossings.mixed += 1;
+    else crossings.grid += 1;
+  });
+
+  const bends = { detour: 0, grid: 0 };
+  layout.edges.forEach((edge) => {
+    const corners = Math.max(0, edge.path.length - 2);
+    if (leavesGridKind(edge.kind)) bends.detour += corners;
+    else bends.grid += corners;
+  });
+  return { bends, crossings };
+}
+
+/** Whether an arrow of this kind has to get out of the grid to arrive. */
+function leavesGridKind(kind: EdgeKind): boolean {
+  return kind === 'around' || kind === 'back';
+}
+
+function leavesGrid(layout: ScopeLayout, leg: Leg): boolean {
+  const edge = layout.edges[leg.owner];
+  return edge !== undefined && leavesGridKind(edge.kind);
+}
+
 /** One straight run of one arrow. Its own shape is the only thing that matters here. */
 interface Leg {
   /** Which arrow it belongs to, so that an arrow is never measured against itself. */
@@ -125,18 +174,24 @@ function legsOf(layout: ScopeLayout): { legs: Leg[]; diagonal: number } {
 }
 
 /**
- * How many pairs of legs meet `meets`. Pairs from one arrow are skipped: its own legs
- * share an end at every corner by construction, and two things claiming the same ink
- * is a confusion the reader has to undo, which one arrow cannot cause.
+ * Every pair of legs belonging to two different arrows. Pairs from one arrow are skipped:
+ * its own legs share an end at every corner by construction, and two things claiming the
+ * same ink is a confusion the reader has to undo, which one arrow cannot cause.
  */
-function countPairs(legs: readonly Leg[], meets: (first: Leg, second: Leg) => boolean): number {
-  let count = 0;
+function eachPair(legs: readonly Leg[], visit: (first: Leg, second: Leg) => void): void {
   legs.forEach((first, at) => {
     for (let further = at + 1; further < legs.length; further += 1) {
       const second = legs[further];
       if (second === undefined || second.owner === first.owner) continue;
-      if (meets(first, second)) count += 1;
+      visit(first, second);
     }
+  });
+}
+
+function countPairs(legs: readonly Leg[], meets: (first: Leg, second: Leg) => boolean): number {
+  let count = 0;
+  eachPair(legs, (first, second) => {
+    if (meets(first, second)) count += 1;
   });
   return count;
 }

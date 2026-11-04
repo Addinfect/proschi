@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { COMPOSES, DEPENDS_ON, USES } from '../ontology/architecture';
-import { layoutScope, type Point, type ScopeLayout } from './layout';
-import { measure, type LayoutMetrics } from './metrics';
+import { layoutScope, type EdgeKind, type Point, type ScopeLayout } from './layout';
+import { costSplit, measure, type LayoutMetrics } from './metrics';
 import { readScope } from './scope';
 import { labelOf, SHOP } from './spike/model';
 
@@ -28,6 +28,8 @@ interface Placed {
 interface Routed {
   readonly path: readonly Point[];
   readonly label?: Point;
+  /** What the router thought it was doing. A fixture that says nothing drew a grid arrow. */
+  readonly kind?: EdgeKind;
 }
 
 /**
@@ -50,7 +52,7 @@ function drawing(boxes: readonly Placed[], edges: readonly Routed[]): ScopeLayou
       relation: 'depends-on',
       from: `from-${at}`,
       to: `to-${at}`,
-      kind: 'forward',
+      kind: edge.kind ?? 'forward',
       count: 1,
       members: [],
       crosses: false,
@@ -186,6 +188,31 @@ describe('a drawing, counted', () => {
     expect(measure(bent)).toEqual({ ...clean, bends: 4 });
   });
 
+  it('splits the cost between the arrows that leave the grid and the rest', () => {
+    const mixed = drawing(
+      [],
+      [
+        // Round the outside and back: two corners, both paid for by this one detour.
+        {
+          path: [
+            { x: 0, y: 0 },
+            { x: 0, y: 50 },
+            { x: 100, y: 50 },
+            { x: 100, y: 0 },
+          ],
+          kind: 'back',
+        },
+        { path: [{ x: 50, y: -20 }, { x: 50, y: 80 }] },
+      ],
+    );
+    // The one crossing is a detour meeting a grid arrow, which is what `mixed` is for:
+    // neither half can fix it alone.
+    expect(costSplit(mixed)).toEqual({
+      bends: { detour: 2, grid: 0 },
+      crossings: { detour: 0, mixed: 1, grid: 0 },
+    });
+  });
+
   it('counts labels that sit on a box or on each other', () => {
     const labels = drawing(
       [{ id: 'box', x: 200, y: 200 }],
@@ -214,6 +241,11 @@ describe('the spike model, measured', () => {
 
   it('draws no line that is not a right angle', () => {
     expect(measure(spike()).diagonal).toBe(0);
+  });
+
+  it('says where the cost sits', () => {
+    // The total above says how bad it is; this says which half of the router to change.
+    expect(costSplit(spike())).toMatchInlineSnapshot();
   });
 
   it('says what the rest of the picture costs', () => {
