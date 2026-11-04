@@ -254,7 +254,7 @@ describe('the spike model, measured', () => {
         "crossings": {
           "detour": 9,
           "grid": 1,
-          "mixed": 18,
+          "mixed": 11,
         },
       }
     `);
@@ -277,7 +277,7 @@ describe('the spike model, measured', () => {
       {
         "area": 625600,
         "bends": 50,
-        "crossings": 28,
+        "crossings": 21,
         "crowding": 0,
         "labelsOnBox": 0,
         "labelsTogether": 0,
@@ -435,61 +435,54 @@ describe('the spike model, crossing by crossing', () => {
       {
         "ranked": [
           {
-            "count": 9,
+            "count": 10,
             "lines": [
-              "channel x=248 of backoffice->bus[around]  with  lane y=168 of partner-integration-gateway->checkout[forward]",
-              "channel x=248 of backoffice->bus[around]  with  lane y=328 of checkout->payments[forward]",
-              "channel x=248 of backoffice->bus[around]  with  lane y=472 of payments->bus[forward]",
+              "channel x=232 of backoffice->bus[around]  with  lane y=168 of partner-integration-gateway->checkout[forward]",
+              "channel x=232 of backoffice->bus[around]  with  lane y=328 of checkout->payments[forward]",
+              "channel x=232 of backoffice->bus[around]  with  lane y=472 of payments->bus[forward]",
+              "channel x=248 of payments->ledger[around]  with  lane y=472 of payments->bus[forward]",
               "channel x=280 of backoffice->ledger[around]  with  lane y=168 of partner-integration-gateway->checkout[forward]",
               "channel x=280 of backoffice->ledger[around]  with  lane y=328 of checkout->payments[forward]",
               "channel x=280 of backoffice->ledger[around]  with  lane y=472 of payments->bus[forward]",
-              "lane y=152 of backoffice->checkout[forward]  with  channel x=248 of backoffice->bus[around]",
+              "lane y=152 of backoffice->checkout[forward]  with  channel x=232 of backoffice->bus[around]",
               "lane y=152 of backoffice->checkout[forward]  with  channel x=280 of backoffice->ledger[around]",
               "lane y=472 of payments->bus[forward]  with  channel x=264 of payments->ledger[around]",
             ],
             "pair": "channel x lane",
           },
           {
-            "count": 7,
-            "lines": [
-              "exit x=130 of checkout->catalog[forward]  with  across-out y=280 of checkout->bus[around]",
-              "exit x=130 of checkout->catalog[forward]  with  across-out y=296 of checkout->ledger[around]",
-              "exit x=147 of storefront->checkout[forward]  with  across-out y=88 of storefront->catalog[around]",
-              "exit x=168 of catalog->bus[forward]  with  across-out y=424 of payments->ledger[around]",
-              "exit x=322 of backoffice->checkout[forward]  with  across-out y=104 of backoffice->bus[around]",
-              "exit x=322 of backoffice->checkout[forward]  with  across-out y=120 of backoffice->ledger[around]",
-              "exit x=360 of payments->bus[forward]  with  across-out y=440 of payments->ledger[around]",
-            ],
-            "pair": "across-out x exit",
-          },
-          {
             "count": 5,
             "lines": [
-              "across-in y=344 of storefront->catalog[around]  with  channel x=56 of checkout->bus[around]",
-              "across-in y=344 of storefront->catalog[around]  with  channel x=72 of checkout->ledger[around]",
-              "across-in y=504 of checkout->bus[around]  with  channel x=72 of checkout->ledger[around]",
-              "across-in y=504 of checkout->bus[around]  with  channel x=88 of payments->ledger[around]",
+              "channel x=280 of backoffice->ledger[around]  with  across-out y=424 of payments->ledger[around]",
+              "channel x=280 of backoffice->ledger[around]  with  across-out y=440 of payments->ledger[around]",
+              "channel x=56 of checkout->bus[around]  with  across-out y=296 of checkout->ledger[around]",
+              "channel x=72 of storefront->catalog[around]  with  across-out y=280 of checkout->bus[around]",
+              "channel x=72 of storefront->catalog[around]  with  across-out y=296 of checkout->ledger[around]",
+            ],
+            "pair": "across-out x channel",
+          },
+          {
+            "count": 2,
+            "lines": [
+              "across-in y=600 of backoffice->ledger[around]  with  channel x=248 of payments->ledger[around]",
               "across-in y=600 of backoffice->ledger[around]  with  channel x=264 of payments->ledger[around]",
             ],
             "pair": "across-in x channel",
           },
           {
-            "count": 3,
+            "count": 2,
             "lines": [
-              "across-in y=488 of backoffice->bus[around]  with  entry x=206 of payments->bus[forward]",
-              "across-in y=616 of payments->ledger[around]  with  entry x=147 of bus->ledger[forward]",
-              "entry x=168 of backoffice->ledger[around]  with  across-in y=616 of payments->ledger[around]",
+              "across-out y=104 of backoffice->bus[around]  with  exit x=322 of backoffice->ledger[around]",
+              "across-out y=280 of checkout->bus[around]  with  exit x=114 of checkout->ledger[around]",
             ],
-            "pair": "across-in x entry",
+            "pair": "across-out x exit",
           },
           {
-            "count": 3,
+            "count": 1,
             "lines": [
-              "channel x=248 of backoffice->bus[around]  with  across-out y=424 of payments->ledger[around]",
-              "channel x=280 of backoffice->ledger[around]  with  across-out y=424 of payments->ledger[around]",
-              "channel x=280 of backoffice->ledger[around]  with  across-out y=440 of payments->ledger[around]",
+              "across-in y=488 of backoffice->bus[around]  with  entry x=190 of payments->bus[forward]",
             ],
-            "pair": "across-out x channel",
+            "pair": "across-in x entry",
           },
           {
             "count": 1,
@@ -499,7 +492,7 @@ describe('the spike model, crossing by crossing', () => {
             "pair": "exit x lane",
           },
         ],
-        "total": 28,
+        "total": 21,
       }
     `);
   });

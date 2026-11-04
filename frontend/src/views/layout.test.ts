@@ -193,6 +193,32 @@ describe('a layout of one level', () => {
     expect(boxOf(layout, 'x').x).toBeLessThan(boxOf(layout, 'y').x);
   });
 
+  it('seats the longest arrow outermost when three targets stand in one column', () => {
+    // One box per rank, so `near`, `mid` and `far` all stand on one x and the anchor
+    // sort has nothing to compare. Left to itself it would keep the model's order, and
+    // reordering two edges would redraw the fan. The arrow that skips the most ranks
+    // sits outermost, so the shorter ones turn in beside it instead of across its run.
+    const graph: Graph = {
+      nodes: [
+        { id: 'hub', type: 'module' },
+        { id: 'near', type: 'module' },
+        { id: 'mid', type: 'module' },
+        { id: 'far', type: 'module' },
+      ],
+      edges: [
+        { id: 'hub-near', relation: 'depends-on', source: 'hub', target: 'near' },
+        { id: 'hub-mid', relation: 'depends-on', source: 'hub', target: 'mid' },
+        { id: 'hub-far', relation: 'depends-on', source: 'hub', target: 'far' },
+        { id: 'near-mid', relation: 'depends-on', source: 'near', target: 'mid' },
+        { id: 'mid-far', relation: 'depends-on', source: 'mid', target: 'far' },
+      ],
+    };
+    const layout = lay(graph);
+    const leaves = (to: string): number => endsOf(edgeOf(layout, 'hub', to)).start.x;
+    expect(leaves('far')).toBeLessThan(leaves('mid'));
+    expect(leaves('mid')).toBeLessThan(leaves('near'));
+  });
+
   it('gives every arrow across one gap its own line, so two labels never share a pixel', () => {
     // Three arrows out of one box and into one rank: one horizontal line each, at
     // three different heights. Stacked on one pixel they read as a single arrow
@@ -557,11 +583,15 @@ describe('a layout of an arrow that cannot cross one gap', () => {
     expect(Math.abs(first - second)).toBe(16);
   });
 
-  it('splits the detours of one anchor over both gaps, where they cost less', () => {
-    // Four arrows into one box, every one of them entering at the bottom. All on one side
-    // of the anchor they cost n*(n-1)/2 crossings, whatever order they take: for any two
-    // of them one lane lies between the other and the anchor. Over both gaps the same
-    // four cost m*(m-1)/2 + k*(k-1)/2, which at two and two is one and one.
+  it('puts the detours of one anchor on the side their source stands', () => {
+    // Four arrows into one box, every one of them entering at the bottom. Splitting them
+    // over both gaps is cheaper at the anchor -- two and two cost one crossing each, one
+    // and three cost none plus three -- and that is the wrong bill to look at. The gap is
+    // not reached for free: q4 stands three columns to the right, and a lane beside the
+    // target means marching back through everything that runs in between. The anchor is a
+    // point at the end of the run; the march is the whole run. So the side follows the
+    // source, and the halving is only the tie breaker for sources standing in the
+    // target's own column, where no side is cheaper than the other.
     const graph: Graph = {
       nodes: [
         { id: 'q1', type: 'module' },
@@ -583,14 +613,17 @@ describe('a layout of an arrow that cannot cross one gap', () => {
     const layout = lay(graph);
     const sink = boxOf(layout, 'sink');
     const lanes = ['q1', 'q2', 'q3', 'q4'].map((id) => edgeOf(layout, id, 'sink').path[2]?.x ?? 0);
-    expect(lanes.filter((x) => x < sink.x).length).toBe(2);
-    expect(lanes.filter((x) => x > sink.x + sink.width).length).toBe(2);
-    // Each of them a step off the box, and no further than the seats need.
-    for (const lane of lanes) {
-      const off = lane < sink.x ? sink.x - lane : lane - (sink.x + sink.width);
-      expect(off).toBeGreaterThanOrEqual(16);
-      expect(off).toBeLessThanOrEqual(32);
-    }
+    // q1 shares the target's column, so the split decides for it and takes the left. The
+    // other three stand to the right and stay there.
+    expect(lanes.filter((x) => x < sink.x).length).toBe(1);
+    expect(lanes.filter((x) => x > sink.x + sink.width).length).toBe(3);
+    // A step off the box each, and no seat left empty: the lone left lane sits at 16,
+    // the three on the right at 16, 32 and 48. Which source takes which seat is the
+    // order within the group, so only the set of distances is pinned here.
+    const offs = lanes
+      .map((lane) => (lane < sink.x ? sink.x - lane : lane - (sink.x + sink.width)))
+      .sort((a, b) => a - b);
+    expect(offs).toEqual([16, 16, 32, 48]);
   });
 });
 

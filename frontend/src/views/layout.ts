@@ -278,13 +278,43 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
   // outside its own destination. A shared column is free between the columns in every
   // rank at once, because no box ever leaves its column. The price is that a narrow rank
   // no longer sits in the middle: it hugs the left edge of its widest column.
+  // Which column a box stands in is a reading of where its sources stand, not of how far
+  // along its rank it happens to sit. The position put every rank of one box in column
+  // zero -- a default rather than a decision -- so a sink fed from column one was dragged
+  // across the picture to reach it, while the one box that could have run straight stood
+  // at the wall. A box therefore wishes for the column most of its sources stand in; one
+  // box, one vote, because two relations drawn between the same pair leave one place. A
+  // tie is no verdict -- no column has a majority -- so such a box keeps its position, and
+  // a rank the model leaves alone is not rearranged by two sources pulling apart.
+  //
+  // The order `orderRows` settled on is not up for negotiation: two boxes swapping places
+  // to please their sources would pay for a crossing somewhere else. So the wishes are made
+  // to climb -- a box whose column is taken moves one to the right -- and a rank may leave
+  // a column empty rather than fold two boxes into one line. A box whose sources are not
+  // placed yet keeps its position, so a rank the model leaves alone still reads as written.
+  const sourcesOf = new Map<Id, Id[]>();
+  for (const edge of scope.edges) {
+    if (!byId.has(edge.from) || !byId.has(edge.to)) continue;
+    const into = sourcesOf.get(edge.to);
+    if (into === undefined) sourcesOf.set(edge.to, [edge.from]);
+    else if (!into.includes(edge.from)) into.push(edge.from);
+  }
   const columnOf = new Map<string, number>();
-  let columnCount = 0;
   for (const key of keys) {
     const row = rows.get(key) ?? [];
-    row.forEach((draft, at) => columnOf.set(draft.id, at));
-    columnCount = Math.max(columnCount, row.length);
+    let last = -1;
+    row.forEach((draft, at) => {
+      // Strictly climbing, never equal: two boxes of one rank may not share a column, and
+      // the order `orderRows` chose has to survive even when a source pulls a box left.
+      const wanted = commonColumn(sourcesOf.get(draft.id) ?? [], columnOf);
+      const column = Math.max(wanted ?? at, last + 1);
+      columnOf.set(draft.id, column);
+      last = column;
+    });
   }
+  // A rank that pushed a box to the right now stands wider than any rank is long.
+  let columnCount = 0;
+  for (const at of columnOf.values()) columnCount = Math.max(columnCount, at + 1);
   // A column is as wide as its widest box, so a narrow one leaves room on its right
   // instead of pushing its neighbours around.
   const columnWidth: number[] = [];
@@ -384,21 +414,62 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
     if (from === undefined) return 0;
     return columnX(columnOf.get(from.id) ?? 0) + from.width / 2;
   };
+  /**
+   * How deep the arrow lands: the one measure that separates two ends that stand in one
+   * column. Not how far it travels. Two arrows out of different ranks can skip the same
+   * number of rows and still enter at different heights, and the gaps between the ranks
+   * are not equally tall -- so a travel distance compares two starts as if where they
+   * started were the same question. What decides a crossing is the entry line: the outer
+   * channel's arrow runs across it, and it only meets the channels standing inside.
+   *
+   * Read from the rank's height, not from the box: the boxes are placed further down, so
+   * their `y` still holds the initial value here -- and a measure that comes out equal for
+   * every arrow sorts nothing at all, which is exactly what it did until now.
+   */
+  const entryLine = (index: number): number => {
+    const to = rank.get(scope.edges[index].to);
+    return to === undefined ? offsetY : (place.get(to) ?? offsetY);
+  };
+  // Which gap a detour picks is a question about columns. Which seat it gets *inside*
+  // that gap is what puts one channel outside another, and that decides crossings --
+  // two detours into two boxes that stand in one column share a gap, and until now
+  // their seats fell out of the order the source happens to declare them in.
+  const berths: { lane: number; index: number; outward: number }[] = [];
   for (const members of groups.values()) {
     members.sort((left, right) => near(left) - near(right));
     members.forEach((index, at) => {
       const to = byId.get(scope.edges[index].to);
       if (to === undefined) return;
       const column = columnOf.get(to.id) ?? 0;
-      // Left half to the gap on the left, right half to the one on the right. The exact
-      // seat inside the box would need the anchors, and those are seated further down;
-      // but they are seated in this same order, so this is the split of the anchors.
-      const lane = at * 2 < members.length ? column : column + 1;
-      const seat = laneUse[lane] ?? 0;
-      laneUse[lane] = seat + 1;
-      laneOf.set(index, lane);
-      laneSeat.set(index, seat);
+      // The side follows where the arrow comes from, not which half of the group it fell
+      // in. A source standing left of its target has nothing to gain from the right gap:
+      // it would have to march across the target's whole column first, and the crossing
+      // budget below does not count that march -- it only counts the lanes at the anchor.
+      // Splitting is only a choice when the sources share one column, because then no side
+      // is cheaper; that is the case the halving was written for. The exact seat inside
+      // the box would need the anchors, and those are seated further down; but they are
+      // seated in this same order, so `at` is still the right split of the anchors.
+      const source = columnOf.get(scope.edges[index].from) ?? 0;
+      const onLeft = source < column || (source === column && at * 2 < members.length);
+      // Both gaps grow away from the columns they flank, so the outer seat is the lowest
+      // one on the left and the highest one on the right.
+      berths.push({
+        lane: onLeft ? column : column + 1,
+        index,
+        outward: onLeft ? -entryLine(index) : entryLine(index),
+      });
     });
+  }
+  // The outer seat goes to the arrow that lands deepest. Every channel inside it has
+  // already come to rest above that entry line, so the outer one turns in without
+  // crossing anything. A left gap grows away from its columns with every seat, a right
+  // one towards them -- hence the sign.
+  berths.sort((left, right) => left.lane - right.lane || left.outward - right.outward);
+  for (const berth of berths) {
+    const seat = laneUse[berth.lane] ?? 0;
+    laneUse[berth.lane] = seat + 1;
+    laneOf.set(berth.index, berth.lane);
+    laneSeat.set(berth.index, seat);
   }
   for (let lane = 0; lane < laneGap.length; lane += 1) {
     // A step of clearance to the box on either side, so a lane never rubs against one.
@@ -559,13 +630,22 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
     // the side rather than shoving an arrow that does land out of line.
     const beyond = Number.POSITIVE_INFINITY;
     const farEnd = new Map<Attachment, number>();
+    const travel = new Map<Attachment, number>();
     for (const slot of side) {
       const far = byId.get(slot.end === 'from' ? slot.edge.to : slot.edge.from);
+      const here = byId.get(slot.end === 'from' ? slot.edge.from : slot.edge.to);
       farEnd.set(slot, far === undefined ? beyond : far.x + far.width / 2);
+      travel.set(slot, far === undefined || here === undefined ? 0 : Math.abs(far.y - here.y));
     }
-    // A stable sort, so two arrows onto one far end keep the model's order between them.
+    // Where the far ends line up the far centre says nothing: three arrows into three
+    // boxes that stand in one column all land on one x, and a plain sort would then let
+    // the order the model declares them in decide where each arrow leaves its box. The
+    // tie goes to the arrow with the longer run -- it takes the outer seat, so its leg
+    // clears the shorter ones' turns instead of crossing them.
     const ordered = [...side].sort(
-      (left, right) => (farEnd.get(left) ?? 0) - (farEnd.get(right) ?? 0),
+      (left, right) =>
+        (farEnd.get(left) ?? 0) - (farEnd.get(right) ?? 0) ||
+        (travel.get(right) ?? 0) - (travel.get(left) ?? 0),
     );
     ordered.forEach((slot, i) => {
       const box = byId.get(slot.end === 'from' ? slot.edge.from : slot.edge.to);
@@ -993,4 +1073,40 @@ function centerY(box: Draft): number {
 function even(value: number): number {
   const rounded = Math.round(value);
   return rounded % 2 === 0 ? rounded : rounded + 1;
+}
+
+/**
+ * The column a majority of a box's sources stand in, or `undefined` when no column has one.
+ *
+ * The ranks are walked from the top, so a box reading this sees every arrow that enters it
+ * from above and none from below -- which is why a box with no such source has to fall back
+ * on its position in the rank instead of inventing a column.
+ *
+ * A majority and not a middle: the sources of one box need not agree, and a middle value
+ * would then move a box whose sources are spread evenly, rearranging a rank on no evidence.
+ * Two sources standing in two columns say nothing about where the box belongs.
+ */
+function commonColumn(
+  sources: readonly Id[],
+  columnOf: ReadonlyMap<string, number>,
+): number | undefined {
+  const counted: number[] = [];
+  for (const source of sources) {
+    const at = columnOf.get(source);
+    if (at === undefined) continue;
+    counted[at] = (counted[at] ?? 0) + 1;
+  }
+  let best: number | undefined;
+  let most = 0;
+  let tied = false;
+  counted.forEach((count, column) => {
+    if (count > most) {
+      best = column;
+      most = count;
+      tied = false;
+    } else if (count === most) tied = true;
+  });
+  // A tie is no verdict: no column has a majority, so the box stays where its rank put it
+  // rather than picking a side the picture could not defend.
+  return tied ? undefined : best;
 }
