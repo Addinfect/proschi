@@ -24,8 +24,13 @@ import type { ScopeEdge, ScopeView } from './scope';
  * ranks leaves the grid and comes back in, and how far out it goes is measured against
  * the boxes it really passes -- not against the picture.
  *
- * Nothing here invents content. There is no node without a box, no box without a
- * node, and the order within a rank is the order the model declares.
+ * The order of the boxes within a rank is the model's, until the model's order costs a
+ * crossing no route could avoid: two arrows whose ends stand in opposite order have to
+ * cross wherever they run. Only then are two neighbours swapped, and only while the
+ * swap pays for itself.
+ *
+ * Nothing here invents content. There is no node without a box, no box without a node,
+ * and no order other than one the model already allows.
  */
 
 /** A point in the drawing, in pixels, origin top left. */
@@ -252,8 +257,9 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
     .filter(({ index }) => kinds[index] === 'back' || kinds[index] === 'around')
     .sort((left, right) => left.span - right.span || left.index - right.index);
 
-  // One row per rank, in model order, because that is the only order anyone
-  // reading the source will recognise.
+  // One row per rank, in model order first, because that is the order anyone reading the
+  // source will recognise; `orderRows` then takes a swap wherever it counts fewer
+  // crossings. A rank that gains nothing keeps the model's order untouched.
   const rows = new Map<number, Draft[]>();
   for (const draft of drafts) {
     const key = rank.get(draft.id) ?? 0;
@@ -262,6 +268,7 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
     else rows.set(key, [draft]);
   }
   const keys = [...rows.keys()].sort((a, b) => a - b);
+  orderRows(rows, keys, scope.edges, rank);
   const widthOfRow = (row: readonly Draft[]): number =>
     row.reduce((sum, draft) => sum + draft.width, 0) + gapX * Math.max(0, row.length - 1);
   const contentWidth = keys.reduce(
@@ -295,15 +302,21 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
       seat(to, index, 'in');
     }
   });
-  const modelIndex = new Map<Id, number>(drafts.map((draft, index) => [draft.id, index]));
+  // Where each box stands in its row -- now the order the picture shows, and no longer
+  // the order the model declares, so a lane seated by the model's order would run across
+  // the box it belongs beside.
+  const rowSeat = new Map<Id, number>();
+  for (const key of keys) {
+    (rows.get(key) ?? []).forEach((draft, index) => rowSeat.set(draft.id, index));
+  }
   // A detour's two seats sit in two gaps, and its horizontal legs must not read across
   // each other, so the lane it lands by comes first.
   const rankOfLane = (lane: Lane): number => (lane === 'in' ? 0 : 1);
   for (const seats of laneOrder.values()) {
     seats.sort(
       (left, right) =>
-        (modelIndex.get(scope.edges[left.index].to) ?? 0) -
-          (modelIndex.get(scope.edges[right.index].to) ?? 0) ||
+        (rowSeat.get(scope.edges[left.index].to) ?? 0) -
+          (rowSeat.get(scope.edges[right.index].to) ?? 0) ||
         rankOfLane(left.end) - rankOfLane(right.end),
     );
   }
@@ -660,6 +673,140 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
     height,
     issues: scope.issues,
   };
+}
+
+/**
+ * Sorts every rank into an order that crosses less than the model's, and leaves a rank
+ * alone when its own order is already as good.
+ *
+ * Two arrows between two neighbouring ranks cross when their two ends stand in opposite
+ * order: one leaves further left and lands further right. That is not a routing fault --
+ * wherever the two are drawn they have to cross -- so the only fix is the order of the
+ * boxes themselves. The order tried first is the model's, because that is the one anyone
+ * reading the source recognises, and every step below has to count fewer crossings to be
+ * kept. Nothing here is moved for looking better.
+ *
+ * The count only sees arrows between neighbouring ranks. An arrow that skips a rank
+ * leaves the grid to do it, so its crossings are the router's business -- until it gets a
+ * place of its own in the rows it passes, which is a later step.
+ */
+function orderRows(
+  rows: Map<number, Draft[]>,
+  keys: readonly number[],
+  edges: readonly ScopeEdge[],
+  rank: ReadonlyMap<Id, number>,
+): void {
+  /** The arrows the grid draws: one rank down, so both their ends stand in a row. */
+  const links: { readonly from: Id; readonly to: Id; readonly upper: number }[] = [];
+  for (const edge of edges) {
+    const upper = rank.get(edge.from);
+    const lower = rank.get(edge.to);
+    if (upper === undefined || lower === undefined || lower - upper !== 1) continue;
+    links.push({ from: edge.from, to: edge.to, upper });
+  }
+  if (links.length === 0) return;
+
+  /** Where each box stands in its row, kept true through every swap below. */
+  const place = new Map<Id, number>();
+  const reseat = (): void => {
+    for (const key of keys) {
+      (rows.get(key) ?? []).forEach((draft, index) => place.set(draft.id, index));
+    }
+  };
+  reseat();
+
+  /** How many arrow pairs trade sides between `upper` and the rank below it. */
+  const crossingBelow = (upper: number): number => {
+    const here = links.filter((link) => link.upper === upper);
+    let count = 0;
+    here.forEach((one, at) => {
+      for (let further = at + 1; further < here.length; further += 1) {
+        const two = here[further];
+        if (two === undefined) continue;
+        const lefts = (place.get(one.from) ?? 0) - (place.get(two.from) ?? 0);
+        const rights = (place.get(one.to) ?? 0) - (place.get(two.to) ?? 0);
+        // Opposite ends, opposite order: these two have to cross.
+        if (lefts * rights < 0) count += 1;
+      }
+    });
+    return count;
+  };
+
+  /** Both sides of one rank: a box sits between two gaps, and both of them count. */
+  const crossingAt = (key: number): number => crossingBelow(key - 1) + crossingBelow(key);
+
+  /**
+   * One rank ordered by the mean place of its neighbours in the rank above or below. A
+   * box with no arrow to that rank keeps the place it has, so a rank nothing points at
+   * does not shuffle for nothing.
+   */
+  const sortByNeighbours = (key: number, reference: number): void => {
+    const row = rows.get(key);
+    if (row === undefined || row.length < 2) return;
+    const sum = new Map<Id, number>();
+    const many = new Map<Id, number>();
+    for (const link of links) {
+      let here: Id | undefined;
+      let there: Id | undefined;
+      if (rank.get(link.from) === key) {
+        here = link.from;
+        there = link.to;
+      } else if (rank.get(link.to) === key) {
+        here = link.to;
+        there = link.from;
+      }
+      if (here === undefined || there === undefined || rank.get(there) !== reference) continue;
+      const at = place.get(there);
+      if (at === undefined) continue;
+      sum.set(here, (sum.get(here) ?? 0) + at);
+      many.set(here, (many.get(here) ?? 0) + 1);
+    }
+    // Read into its own map before sorting: the comparator must not look at a map the
+    // sort is itself changing.
+    const wanted = new Map<Id, number>(
+      row.map((draft) => {
+        const count = many.get(draft.id) ?? 0;
+        const mean = count === 0 ? place.get(draft.id) ?? 0 : (sum.get(draft.id) ?? 0) / count;
+        return [draft.id, mean] as const;
+      }),
+    );
+    row.sort((left, right) => (wanted.get(left.id) ?? 0) - (wanted.get(right.id) ?? 0));
+    reseat();
+  };
+
+  /** Neighbours swapped while a swap pays: a mean can be right for the wrong reason. */
+  const untangle = (key: number): void => {
+    const row = rows.get(key);
+    if (row === undefined || row.length < 2) return;
+    for (let pass = 0; pass < 4; pass += 1) {
+      let swapped = false;
+      for (let at = 0; at + 1 < row.length; at += 1) {
+        const left = row[at];
+        const right = row[at + 1];
+        if (left === undefined || right === undefined) continue;
+        const before = crossingAt(key);
+        row[at] = right;
+        row[at + 1] = left;
+        reseat();
+        if (crossingAt(key) < before) swapped = true;
+        else {
+          row[at] = left;
+          row[at + 1] = right;
+          reseat();
+        }
+      }
+      if (!swapped) return;
+    }
+  };
+
+  // Down, then up, four times: each sweep orders one rank against a neighbour that is
+  // already settled, and the next sweep has one more rank to read. More rounds cost the
+  // same and stop changing anything.
+  for (let round = 0; round < 4; round += 1) {
+    for (const key of keys) sortByNeighbours(key, key - 1);
+    for (const key of [...keys].reverse()) sortByNeighbours(key, key + 1);
+    for (const key of keys) untangle(key);
+  }
 }
 
 /**

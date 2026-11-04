@@ -245,14 +245,26 @@ describe('the spike model, measured', () => {
 
   it('says where the cost sits', () => {
     // The total above says how bad it is; this says which half of the router to change.
-    expect(costSplit(spike())).toMatchInlineSnapshot();
+    expect(costSplit(spike())).toMatchInlineSnapshot(`
+      {
+        "bends": {
+          "detour": 28,
+          "grid": 22,
+        },
+        "crossings": {
+          "detour": 24,
+          "grid": 8,
+          "mixed": 22,
+        },
+      }
+    `);
   });
 
   it('says what the rest of the picture costs', () => {
     const metrics = measure(spike());
     // The numbers below are the picture as it is, not as it should be: `shared` counts
-    // the two loops on one box that are drawn in the same place. Lowering them is what
-    // the next change is for, and this is where it has to show.
+    // the two loops on one box that are drawn in the same place. Ordering the ranks was
+    // worth 2 crossings and no more -- the rest sits where the order cannot reach it.
     expect({
       shared: metrics.shared,
       crossings: metrics.crossings,
@@ -265,7 +277,7 @@ describe('the spike model, measured', () => {
       {
         "area": 554944,
         "bends": 50,
-        "crossings": 56,
+        "crossings": 54,
         "crowding": 2,
         "labelsOnBox": 0,
         "labelsTogether": 0,
