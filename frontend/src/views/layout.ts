@@ -389,14 +389,15 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
     gaps.set(key, gap);
     top += boxHeight + gap;
   }
-  // Where a detour's lane goes, and why this is not the coin toss it used to be: the
-  // lane belongs in the gap beside the box it enters. The leg that leaves the source is
-  // long wherever the lane stands -- it has to cross the picture either way. The entry
-  // leg is the one that pays for the lane's position, because it crosses every lane
-  // standing between it and its anchor; and n lanes on one side of one anchor cost
-  // n*(n-1)/2 crossings, whatever order they stand in, because for any pair of them one
-  // lane lies between the other and the anchor. Split them over the two gaps and the
-  // same n cost m*(m-1)/2 + k*(k-1)/2, with m + k = n: at six, six instead of fifteen.
+  // Where a detour's lane goes. It belongs in the gap beside the box it enters, because
+  // the entry leg is the one that pays for the lane's position: it crosses every lane
+  // standing between it and its anchor. Spreading the detours of one anchor over both
+  // gaps is cheaper at the anchor -- n on one side cost n*(n-1)/2, m and k cost
+  // m*(m-1)/2 + k*(k-1)/2 -- and that is the wrong bill. The gap is not reached for free:
+  // a lane beside the target means marching back through everything in between, and the
+  // anchor count never sees that march. So the side follows the source, and the halving
+  // only decides between sources that stand in the target's own column, where no side is
+  // cheaper than the other.
   const laneOf = new Map<number, number>();
   const laneSeat = new Map<number, number>();
   const laneUse: number[] = new Array<number>(columnCount + 1).fill(0);
@@ -505,6 +506,10 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
   // narrow rank would sort as far left as one at the edge of a wide rank.
   // A detour takes the outer edge of the whole run, at either end. Its leg does not stop
   // on the lane but runs on across the gap, so it must not sit among legs that end there.
+  // Tried the other way round -- detours at the bottom of the outgoing group, on the guess
+  // that their leg would then start below the forward lanes it used to cross: crossings
+  // went 21 -> 25. The leg still has to pass everything seated below it, so the top is
+  // where it has least to cross, and the outer edge it stays.
   const farX = (index: number): number => {
     const edge = scope.edges[index];
     const far = edge === undefined ? undefined : byId.get(edge.to);
