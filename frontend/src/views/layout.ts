@@ -463,6 +463,9 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
   // Where each arrow touches a box. Two relations out of one box used to start on
   // the same pixel and read as a single line that forks; each arrow now gets its
   // own anchor, spread evenly along the side it leaves or lands on.
+  // The order along that side is the order of the far ends, not the order the source
+  // declares them in: two arrows out of one box onto two targets that stand the other
+  // way round cross right behind the box, and no route can separate them there.
   const ends = scope.edges.map((): Ends => ({}));
   const sides = new Map<string, Attachment[]>();
   const addSlot = (index: number, end: 'from' | 'to', side: Side): void => {
@@ -488,11 +491,23 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
     }
   });
   for (const side of sides.values()) {
-    const n = side.length;
-    side.forEach((slot, i) => {
+    // Where the other end stands, which is what the anchor has to line up with. An end
+    // outside this level has no place to line up with, so it takes the last anchor of
+    // the side rather than shoving an arrow that does land out of line.
+    const beyond = Number.POSITIVE_INFINITY;
+    const farEnd = new Map<Attachment, number>();
+    for (const slot of side) {
+      const far = byId.get(slot.end === 'from' ? slot.edge.to : slot.edge.from);
+      farEnd.set(slot, far === undefined ? beyond : far.x + far.width / 2);
+    }
+    // A stable sort, so two arrows onto one far end keep the model's order between them.
+    const ordered = [...side].sort(
+      (left, right) => (farEnd.get(left) ?? 0) - (farEnd.get(right) ?? 0),
+    );
+    ordered.forEach((slot, i) => {
       const box = byId.get(slot.end === 'from' ? slot.edge.from : slot.edge.to);
       if (box === undefined) return;
-      const along = (i + 1) / (n + 1);
+      const along = (i + 1) / (ordered.length + 1);
       slot.at = Math.round(box.x + box.width * along);
     });
   }
@@ -688,7 +703,9 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
  *
  * The count only sees arrows between neighbouring ranks. An arrow that skips a rank
  * leaves the grid to do it, so its crossings are the router's business -- until it gets a
- * place of its own in the rows it passes, which is a later step.
+ * place of its own in the rows it passes, which is a later step. Two arrows out of one box
+ * count as no crossing here, and that is only true because an anchor is placed by where the
+ * far end stands: a fan that left in the source's order would cross behind its own box.
  */
 function orderRows(
   rows: Map<number, Draft[]>,

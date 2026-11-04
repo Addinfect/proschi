@@ -249,12 +249,12 @@ describe('the spike model, measured', () => {
       {
         "bends": {
           "detour": 28,
-          "grid": 22,
+          "grid": 20,
         },
         "crossings": {
-          "detour": 24,
-          "grid": 8,
-          "mixed": 22,
+          "detour": 23,
+          "grid": 5,
+          "mixed": 18,
         },
       }
     `);
@@ -262,9 +262,9 @@ describe('the spike model, measured', () => {
 
   it('says what the rest of the picture costs', () => {
     const metrics = measure(spike());
-    // The numbers below are the picture as it is, not as it should be: `shared` counts
-    // the two loops on one box that are drawn in the same place. Ordering the ranks was
-    // worth 2 crossings and no more -- the rest sits where the order cannot reach it.
+    // The numbers below are the picture as it is, not as it should be. Ordering the ranks
+    // was worth 2 crossings; spreading the anchors by where they land was worth 8 more, and
+    // `shared` fell to 0 with them -- no two arrows are pushed onto one pixel any more.
     expect({
       shared: metrics.shared,
       crossings: metrics.crossings,
@@ -276,12 +276,12 @@ describe('the spike model, measured', () => {
     }).toMatchInlineSnapshot(`
       {
         "area": 554944,
-        "bends": 50,
-        "crossings": 54,
+        "bends": 48,
+        "crossings": 46,
         "crowding": 2,
         "labelsOnBox": 0,
         "labelsTogether": 0,
-        "shared": 1,
+        "shared": 0,
       }
     `);
   });

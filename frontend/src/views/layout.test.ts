@@ -166,6 +166,29 @@ describe('a layout of one level', () => {
     expect(endsOf(edgeOf(layout, 'a', 'b')).end).toEqual({ x: b.x + b.width / 2, y: b.y });
   });
 
+  it('lets a fan leave the box in the order it lands, not the order the source lists it', () => {
+    // `src` needs `y` first and `x` second, but `x` stands left of `y`. Spread in the
+    // source's order the two arrows would cross right behind the box, where nothing the
+    // router does can separate them; spread in the order they land they only fan out.
+    const graph: Graph = {
+      nodes: [
+        { id: 'src', type: 'module' },
+        { id: 'x', type: 'module' },
+        { id: 'y', type: 'module' },
+      ],
+      edges: [
+        { id: 'src-needs-y', relation: 'depends-on', source: 'src', target: 'y' },
+        { id: 'src-needs-x', relation: 'depends-on', source: 'src', target: 'x' },
+      ],
+    };
+    const layout = lay(graph);
+    const left = endsOf(edgeOf(layout, 'src', 'x')).start.x;
+    const right = endsOf(edgeOf(layout, 'src', 'y')).start.x;
+    expect(left).toBeLessThan(right);
+    // Which is the order the two boxes stand in, so neither arrow has to reach back.
+    expect(boxOf(layout, 'x').x).toBeLessThan(boxOf(layout, 'y').x);
+  });
+
   it('gives every arrow across one gap its own line, so two labels never share a pixel', () => {
     // Three arrows out of one box and into one rank: one horizontal line each, at
     // three different heights. Stacked on one pixel they read as a single arrow
