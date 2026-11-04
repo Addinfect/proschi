@@ -381,7 +381,10 @@ describe('a layout of an awkward level', () => {
     const a = boxOf(layout, 'a');
     const b = boxOf(layout, 'b');
     expect(back.path[0]?.y).toBe(b.y);
-    expect(back.path[1]?.x).toBeLessThan(a.x);
+    // Up out of the top first, then across: the channel is the third point, and it sits
+    // left of the box the arrow lands on rather than at the edge of the picture.
+    expect(back.path[1]?.y).toBeLessThan(b.y);
+    expect(back.path[2]?.x).toBeLessThan(a.x);
     const { start, end } = endsOf(back);
     expect(start.y).toBe(b.y);
     expect(end.y).toBe(a.y + a.height);
