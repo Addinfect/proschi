@@ -376,9 +376,20 @@ describe('a layout of an awkward level', () => {
     const back = edgeOf(layout, 'b', 'a');
     expect(down.kind).toBe('forward');
     expect(back.kind).toBe('back');
-    // Out of the left edge of its box, and to the left of both boxes.
-    expect(back.path[0]?.x).toBe(boxOf(layout, 'b').x);
-    expect(back.path[1]?.x).toBeLessThan(boxOf(layout, 'a').x);
+    // Up out of the top of its box, round on the left, and back in at the bottom:
+    // sideways out of `b` would have run along its own rank, past its own neighbour.
+    const a = boxOf(layout, 'a');
+    const b = boxOf(layout, 'b');
+    expect(back.path[0]?.y).toBe(b.y);
+    expect(back.path[1]?.x).toBeLessThan(a.x);
+    const { start, end } = endsOf(back);
+    expect(start.y).toBe(b.y);
+    expect(end.y).toBe(a.y + a.height);
+    for (const leg of legsOf(back)) {
+      for (const box of layout.boxes) {
+        expect(crossesBox(leg, box)).toBe(false);
+      }
+    }
   });
 
   it('widens a box for a long label, and stops at the maximum', () => {
@@ -436,31 +447,43 @@ describe('a layout of an arrow that cannot cross one gap', () => {
     expect(Math.min(...over.path.map((point) => point.x))).toBeLessThan(a.x);
   });
 
-  it('gives every arrow that leaves the grid a channel of its own', () => {
-    // Two arrows leave the grid over one rank each, and there is nothing to share:
-    // two detours on one vertical would read as a single arrow.
+  it('measures a channel against the boxes it passes, not against the picture', () => {
+    // Two cycles side by side. Each closing edge climbs over one gap and passes no box
+    // at all, so each turns beside its own column: the left one outside the picture,
+    // the right one between the two columns. One margin for the whole level would have
+    // sent both of them out past the left edge.
     const graph: Graph = {
       nodes: [
         { id: 'a', type: 'module' },
         { id: 'b', type: 'module' },
         { id: 'c', type: 'module' },
+        { id: 'd', type: 'module' },
       ],
       edges: [
         { id: 'a-needs-b', relation: 'depends-on', source: 'a', target: 'b' },
-        { id: 'b-needs-c', relation: 'depends-on', source: 'b', target: 'c' },
         { id: 'b-needs-a', relation: 'depends-on', source: 'b', target: 'a' },
-        { id: 'c-needs-b', relation: 'depends-on', source: 'c', target: 'b' },
+        { id: 'c-needs-d', relation: 'depends-on', source: 'c', target: 'd' },
+        { id: 'd-needs-c', relation: 'depends-on', source: 'd', target: 'c' },
       ],
     };
     const layout = lay(graph);
-    const channels = [edgeOf(layout, 'b', 'a'), edgeOf(layout, 'c', 'b')].map((edge) => {
-      expect(edge.kind).toBe('back');
-      const channel = Math.min(...edge.path.map((point) => point.x));
-      // Clear of every box in the picture, not merely of its own two.
-      for (const box of layout.boxes) expect(channel).toBeLessThan(box.x);
-      return channel;
-    });
-    expect(channels[0]).not.toBe(channels[1]);
+    const inner = edgeOf(layout, 'b', 'a');
+    const outer = edgeOf(layout, 'd', 'c');
+    expect(inner.kind).toBe('back');
+    expect(outer.kind).toBe('back');
+    for (const edge of [inner, outer]) {
+      for (const leg of legsOf(edge)) {
+        for (const box of layout.boxes) expect(crossesBox(leg, box)).toBe(false);
+      }
+    }
+    const left = Math.min(...inner.path.map((point) => point.x));
+    const right = Math.min(...outer.path.map((point) => point.x));
+    // The inner one steps out just far enough, the outer one turns where its own
+    // column ends -- both are clear of the boxes they pass, and neither is dragged
+    // out to the edge of the level.
+    expect(left).toBeLessThan(boxOf(layout, 'a').x);
+    expect(right).toBeGreaterThan(boxOf(layout, 'a').x);
+    expect(right).toBeLessThan(boxOf(layout, 'c').x);
   });
 
   it('seats the shortest detour nearest the boxes', () => {

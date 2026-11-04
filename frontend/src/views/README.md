@@ -71,10 +71,15 @@ Five routes, and `kind` says which one an arrow got:
 | `kind` | When | Drawn as |
 | --- | --- | --- |
 | `forward` | one rank down | out of the bottom, into the top, one elbow |
-| `around` | further down than one rank | around the left margin, past the ranks it skips |
-| `back` | to the same or a higher rank | around the left of both boxes |
+| `around` | further down than one rank | out of the bottom, into the top, and around the boxes of the ranks it skips |
+| `back` | to a higher rank | out of the top, back up into the bottom of the other |
 | `self` | both ends on one box | a loop on its right edge |
 | `cross` | an end is outside the scope | through the wall of the opened node, and out |
+
+Every horizontal leg runs in a gap. A leg along a rank would pass through the boxes
+standing in it, and a line drawn through a box is a claim about that box; so an arrow
+that has to cross two ranks leaves the grid instead of crossing them, and re-enters
+above the box it lands on.
 
 Two things this deliberately does not do. It does not measure text — a box widens
 with its label by an approximation (`charWidth`), because measuring needs a DOM and
@@ -99,10 +104,13 @@ the gap grows when more arrows need it than the default one can seat. One line f
 three relations put three counts on one pixel.
 
 Nor do they **share a channel**. An arrow that cannot cross a single gap — a `back`
-edge, or an `around` one that skips a rank — leaves the grid and travels in the left
-margin: one channel per arrow, the shortest detour nearest the boxes, and the margin
-widens with their number the way a gap does. Two detours on one vertical would read as
-one arrow.
+edge, or an `around` one that skips a rank — leaves the grid and runs in a channel left
+of the boxes it passes: one channel per arrow, the shortest detour nearest the boxes,
+and two of them on one vertical would read as one arrow. A channel is measured against
+those boxes, not against the picture, so it sits just outside the leftmost rank it
+crosses; the picture widens only when a channel would land left of the padding. Two
+detours past the same boxes nest along one vertical, past different boxes they can
+still cross.
 
 ## `ink.ts`
 
