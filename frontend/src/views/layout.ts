@@ -302,25 +302,6 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
       seat(to, index, 'in');
     }
   });
-  // Where each box stands in its row -- now the order the picture shows, and no longer
-  // the order the model declares, so a lane seated by the model's order would run across
-  // the box it belongs beside.
-  const rowSeat = new Map<Id, number>();
-  for (const key of keys) {
-    (rows.get(key) ?? []).forEach((draft, index) => rowSeat.set(draft.id, index));
-  }
-  // A detour's two seats sit in two gaps, and its horizontal legs must not read across
-  // each other, so the lane it lands by comes first.
-  const rankOfLane = (lane: Lane): number => (lane === 'in' ? 0 : 1);
-  for (const seats of laneOrder.values()) {
-    seats.sort(
-      (left, right) =>
-        (rowSeat.get(scope.edges[left.index].to) ?? 0) -
-          (rowSeat.get(scope.edges[right.index].to) ?? 0) ||
-        rankOfLane(left.end) - rankOfLane(right.end),
-    );
-  }
-
   const root = scope.root;
   const framed = root !== undefined;
   // Inside a frame the boxes start past the wall, the header and the frame's own
@@ -353,6 +334,37 @@ export function layoutScope(scope: ScopeView, spec: LayoutSpec = {}): ScopeLayou
       draft.y = y;
       x += draft.width + gapX;
     }
+  }
+
+  // Lanes within one gap run against each other: an arrow that leaves a box runs down
+  // from the box and stops on its lane, one that enters the box below starts on its lane
+  // and runs on down. Interleaved, every incoming vertical crosses every outgoing lane
+  // beneath it, so the two groups stay apart -- outgoing below, incoming above.
+  // Within a group the order is where the other end stands, left to right, which is the
+  // measure the anchors use further down too. A seat inside the row would not do: it says
+  // where a box stands in *its own* rank, so two arrows into two different ranks would be
+  // compared as if that number were a place in the picture -- and a box in the middle of a
+  // narrow rank would sort as far left as one at the edge of a wide rank.
+  // A detour takes the far edge of its group, because its leg does not stop on the lane
+  // but runs on across the gap. Seated below every outgoing arrow, all those verticals
+  // end above it, so it crosses none of them.
+  const farX = (index: number): number => {
+    const edge = scope.edges[index];
+    const far = edge === undefined ? undefined : byId.get(edge.to);
+    return far === undefined ? 0 : far.x + far.width / 2;
+  };
+  const group = (index: number, lane: Lane): number => {
+    const kind = kinds[index];
+    const detour = kind === 'around' || kind === 'back';
+    if (lane === 'in') return detour ? 0 : 1;
+    return detour ? 3 : 2;
+  };
+  for (const seats of laneOrder.values()) {
+    seats.sort(
+      (left, right) =>
+        group(left.index, left.end) - group(right.index, right.end) ||
+        farX(left.index) - farX(right.index),
+    );
   }
 
   // A lane sits in the gap below a rank, one per arrow, half a lane clear of either
