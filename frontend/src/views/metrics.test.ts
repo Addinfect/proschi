@@ -229,6 +229,16 @@ describe('the spike model, measured', () => {
       labelsOnBox: metrics.labelsOnBox,
       labelsTogether: metrics.labelsTogether,
       area: metrics.area,
-    }).toMatchInlineSnapshot();
+    }).toMatchInlineSnapshot(`
+      {
+        "area": 554944,
+        "bends": 50,
+        "crossings": 56,
+        "crowding": 2,
+        "labelsOnBox": 0,
+        "labelsTogether": 0,
+        "shared": 1,
+      }
+    `);
   });
 });
