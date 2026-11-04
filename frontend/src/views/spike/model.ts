@@ -23,8 +23,9 @@ import { COMPOSES, DEPENDS_ON, USES } from '../../ontology/architecture';
  * - `ops` has no edge at all, and `partner-integration-gateway` is wider than its
  *   rank neighbours.
  *
- * Nothing else imports this. It exists to be looked at, and it goes away with the
- * rest of `spike/`.
+ * One thing imports this: `metrics.test.ts`, which measures the layout of the top
+ * level so that "a mess" becomes a number a change can be held to. It still goes away
+ * with the rest of `spike/`.
  */
 
 const part = (id: Id, name: string, layer: string): Node => ({
